@@ -121,6 +121,7 @@ const SAFE = {
   'worker/src/fallback.ts': 'gates on non-resolved incidents: a #1623 today-row correctly marks the service as carrying an outage; no time or text is read',
   'worker/src/incident-text.ts': 'skips resolved and derived (#1623) — a cause must be the provider\'s own live text',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved and derived',
+  'worker/src/shared-upstream.ts': '#1991 consumes incident-text.ts causal incidents, which skip resolved and derived',
   'worker/src/platform-monitor.ts': 'active incidents only, from non-Better-Stack sources',
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is on a card and reads title + finalStatus of an accumulator row (#1118); no start, duration or resolution time',
@@ -146,6 +147,7 @@ const SAFE = {
   'src/locales/en.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
   'src/locales/ko.js': 'a flat key→string copy map; the match is a dotted i18n KEY, not a field read',
   'api/_is-down/upstream-note.ts': 'renders UpstreamLink records built by upstream-link.ts, which sources causal incidents from incident-text.ts — resolved skipped',
+  'api/_is-down/shared-upstream-note.ts': '#1991 renders sharedUpstream groups built by shared-upstream.ts from incident-text.ts causal incidents — resolved and derived skipped',
   'worker/src/monthly-narrative.ts': 'names the divisor without asserting a cause for the excluded rows',
   'worker/src/weekly-briefing.ts': 'labels the figure "incident records", not events',
   'src/utils/recoveredGrouping.js': 'a rows EXISTENCE comes from the recovered: KV marker, and isMarkableOnStatusEdge (recovery-mark.ts) refuses to write one for a derived incident — so no row is ever built',
@@ -275,6 +277,7 @@ const RB_SAFE = {
   'worker/src/withdrawal-log.ts': 'rows render from a tombstone that only exists because withdrawalHold (now fixed) let the withdrawal through',
   'worker/src/probe-archival.ts': 'the incidentWindows param that would read anything is passed by NO production caller (TODO #132)',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts\'s causalIncidents, which already excludes retainedBridge before this file sees it',
+  'worker/src/shared-upstream.ts': '#1991 consumes incident-text.ts\'s causalIncidents, which already excludes retainedBridge before this file sees it',
   'worker/src/incident-history.ts': 'both callers already gate it before calling buildHistoryRecord — recovery-mark.ts\'s isMarkableOnStatusEdge refuses it, and alerts.ts\'s alerted:res: path only ever processes ids legitimately tracked start-to-finish',
   'worker/src/prediction-accuracy.ts': 'every entry point returns early without an ai:analysis — ai-analysis.ts (fixed) never analyzes a retainedBridge incident, so one is never present',
   'src/components/AnalysisModal.jsx': 'renders an AI analysis, which a retainedBridge incident never has (ai-analysis.ts excludes it from analysis entirely)',
@@ -289,6 +292,7 @@ const RB_SAFE = {
   'api/_is-down/seo-content.ts': 'static per-service SEO copy, no logic',
   'api/_methodology/html-template.ts': 'static prose describing the Score, no logic',
   'api/_is-down/upstream-note.ts': 'renders UpstreamLink records sourced from incident-text.ts\'s causalIncidents, already excluded there',
+  'api/_is-down/shared-upstream-note.ts': '#1991 renders sharedUpstream groups sourced from incident-text.ts\'s causalIncidents, already excluded there',
   'src/components/IncidentTimeline.jsx': 'renders whatever timeline it is given; an empty one (every retainedBridge incident\'s) is already handled as the empty case',
   'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
   'src/components/SkeletonUI.jsx': 'loading placeholder — renders no real incident data',
@@ -360,6 +364,7 @@ const SU_SAFE = {
   'worker/src/fallback.ts': 'gates on non-resolved incidents',
   'worker/src/incident-text.ts': 'skips resolved — a cause must be live',
   'worker/src/upstream-link.ts': 'consumes incident-text.ts causal incidents, which skip resolved',
+  'worker/src/shared-upstream.ts': '#1991 consumes incident-text.ts causal incidents, which skip resolved',
   'worker/src/platform-monitor.ts': 'reads Atlassian\'s own meta-status response, not our Incident type',
   'worker/src/infra-status.ts': 'reads Cloudflare/Vercel/GitHub\'s own status responses (#1686), not our Incident type',
   'worker/src/alerted-gone.ts': 'tests only whether an announced incident id is listed on a card (#1118); it never reads a start, an elapsed time or a resolution time',
@@ -416,6 +421,7 @@ const SU_SAFE = {
   'api/_is-down/seo-content.ts': 'static per-service SEO copy',
   'api/_methodology/html-template.ts': 'static prose describing the Score',
   'api/_is-down/upstream-note.ts': 'renders UpstreamLink records sourced from causal incidents, which skip resolved',
+  'api/_is-down/shared-upstream-note.ts': '#1991 renders sharedUpstream groups sourced from causal incidents, which skip resolved',
 }
 
 function consumers() {
@@ -460,7 +466,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 86 → 87: #1797 added worker/src/late-resolution.ts, which matches live resolved incidents to a past month's archive rows.
     // 87 → 88: #887 added worker/src/sitemap-feed.ts, which takes a service's latest incident instant as its sitemap lastmod.
     // 89 → 90: #1938 added worker/src/reissued-duplicates.ts, which names a possible duplicate pair in the archive-ready notice; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(91)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(93)
   })
 
   it('leaves none unclassified', () => {
@@ -514,7 +520,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(91)
+    expect(all.length).toBe(93)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -560,7 +566,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(91)
+    expect(all.length).toBe(93)
   })
 
   it('leaves none unclassified for startUnknown', () => {

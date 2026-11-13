@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { sharedUpstreamGroups, namesThirdParty, blameText, THIRD_PARTIES } from '../shared-upstream'
+import { sharedUpstreamGroups, namesThirdParty, blameText, MIRROR_SERVICES, THIRD_PARTIES } from '../shared-upstream'
+import { SERVICES } from '../services'
 import type { Incident, ServiceStatus } from '../types'
 
-type Svc = Pick<ServiceStatus, 'id' | 'name' | 'provider' | 'incidents'>
+type Svc = Pick<ServiceStatus, 'id' | 'name' | 'provider' | 'status' | 'incidents'>
 
+let seq = 0
 const inc = (title: string, updates: string[] = [], over: Partial<Incident> = {}): Incident => ({
-  id: `i-${title.slice(0, 12)}`, title, status: 'identified', impact: 'minor', startedAt: '2026-11-12T17:52:44Z',
+  id: `i-${++seq}`, title, status: 'identified', impact: 'minor', startedAt: '2026-11-12T17:52:44Z',
   duration: null, timeline: updates.map((text) => ({ stage: 'identified', text, at: '2026-11-12T18:00:00Z' })), ...over,
 } as Incident)
-const svc = (id: string, provider: string, incidents: Incident[]): Svc => ({ id, name: id, provider, incidents })
+const svc = (id: string, provider: string, incidents: Incident[]): Svc => ({ id, name: id, provider, status: 'degraded', incidents })
 
 const keys = (services: Svc[]) => sharedUpstreamGroups(services).map((g) => [g.thirdParty.key, g.services.map((s) => s.id)])
 
@@ -51,6 +53,19 @@ describe('#1991 sharedUpstreamGroups — the classified groups from the issue', 
   })
 })
 
+describe('#1991 sharedUpstreamGroups — what each service carries', () => {
+  it('the incident that names the third party, not the first open one', () => {
+    const [g] = sharedUpstreamGroups([
+      svc('claudeai', 'Anthropic', [inc('Elevated errors on Opus'), inc('Elevated errors affecting the Microsoft 365 connector', [], { startedAt: '2026-11-12T17:52:44Z' })]),
+      svc('chatgpt', 'OpenAI', [inc('Microsoft 365 connector errors', [], { startedAt: '2026-11-12T18:03:00Z' })]),
+    ])
+    expect(g.services).toEqual([
+      { id: 'claudeai', name: 'claudeai', provider: 'Anthropic', status: 'degraded', incidentTitle: 'Elevated errors affecting the Microsoft 365 connector', startedAt: '2026-11-12T17:52:44Z' },
+      { id: 'chatgpt', name: 'chatgpt', provider: 'OpenAI', status: 'degraded', incidentTitle: 'Microsoft 365 connector errors', startedAt: '2026-11-12T18:03:00Z' },
+    ])
+  })
+})
+
 describe('#1991 sharedUpstreamGroups — what must not group', () => {
   it('one provider alone is not a shared cause, even across its sibling surfaces', () => {
     const t = 'Elevated errors affecting the Microsoft 365 connector'
@@ -69,6 +84,17 @@ describe('#1991 sharedUpstreamGroups — what must not group', () => {
       svc('copilot', 'GitHub', [inc('Disruption with some Copilot services', ['Copilot on GitHub is degraded'])]),
       svc('cursor', 'Anysphere', [inc('Slow clones from GH due to Github degradation')]),
     ])).toEqual([])
+  })
+
+  it("Grok Bot, read from Cursor's page, takes no part", () => {
+    const a = inc('IDE errors due to Cloudflare outage', [], { id: 'cur-A' })
+    const b = inc('Grok Bot and IDE errors due to Cloudflare outage', [], { id: 'cur-B' })
+    expect(keys([svc('grokbot', 'SpaceXSI', [b]), svc('cursor', 'Anysphere', [a, b])])).toEqual([])
+    expect(keys([
+      svc('grok', 'SpaceXSI', [inc('Degraded performance due to Cloudflare issues', [], { id: 'xai-1' })]),
+      svc('grokbot', 'SpaceXSI', [b]),
+      svc('cursor', 'Anysphere', [b]),
+    ])).toEqual([['cloudflare', ['grok', 'cursor']]])
   })
 
   it('region tags on two unrelated incidents are not a shared cause', () => {
@@ -144,5 +170,17 @@ describe('#1991 namesThirdParty', () => {
       expect(tp.aliases.length).toBeGreaterThan(0)
       expect(tp.statusUrl).toMatch(/^https:\/\//)
     }
+  })
+})
+
+describe('#1991 MIRROR_SERVICES', () => {
+  it('every status page read by more than one provider is one provider once its mirrors are left out', () => {
+    const byPage = new Map<string, Set<string>>()
+    for (const s of SERVICES) {
+      if (MIRROR_SERVICES.includes(s.id)) continue
+      const page = new URL(s.statusUrl).host
+      byPage.set(page, (byPage.get(page) ?? new Set()).add(s.provider))
+    }
+    expect([...byPage].filter(([, providers]) => providers.size > 1)).toEqual([])
   })
 })

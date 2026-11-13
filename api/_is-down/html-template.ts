@@ -21,6 +21,7 @@ import { estimateAccuracyText, isEstimateAccuracy, recoveryBaselineText, type Es
 // #1053 — the note shape is owned by upstream-note.ts (where the claim is built); importing it keeps
 // one definition of the contract instead of a second copy that can drift.
 import type { UpstreamNote as UpstreamNoteLike } from './upstream-note'
+import type { SharedUpstreamNote } from './shared-upstream-note'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -495,6 +496,7 @@ export function renderPage(
   // #1753 — a listed service's substitutes, one entry per use; rendered under "For <use>" subheadings.
   fallbackGroups?: Array<{ use: string; items: Fallback[] }>,
   estimateAccuracy?: EstimateAccuracy | null,
+  sharedUpstreamNotes: SharedUpstreamNote[] = [],
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -727,6 +729,7 @@ ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORES, {
 ${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups, estimateAccuracy ?? undefined)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
+${renderSharedUpstreamNotes(sharedUpstreamNotes, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
 ${renderScheduledMaintenance(service?.scheduledMaintenances, 'ongoing')}
@@ -1052,7 +1055,7 @@ function leadLabel(mins: number): string {
   return mins % 60 === 0 ? `${h}h` : `${h}h ${mins % 60}m`
 }
 
-function upstreamRow(u: UpstreamNoteLike['upstream'][number], displayName: string, fromId: string): string {
+function upstreamRow(u: UpstreamNoteLike['upstream'][number], displayName: string, fromId: string, gaEvent = 'upstream_link'): string {
   const color = statusColor(u.status)
   const lead = u.leadMinutes != null
     ? ` &middot; ${leadLabel(u.leadMinutes)} before ${esc(displayName)}&rsquo;s report`
@@ -1076,7 +1079,7 @@ function upstreamRow(u: UpstreamNoteLike['upstream'][number], displayName: strin
   // going forward. A non-carded upstream (GitHub) has no is-down page, so its row would otherwise
   // name an outage and offer nowhere to check it — the hole this fills.
   const link = u.href
-    ? `<div style="margin-top:6px"><a class="mono" style="font-size:11px" href="${esc(u.href)}"${u.external ? ' target="_blank" rel="noopener noreferrer"' : ''} data-ga="upstream_link" data-ga-loc="is_down_page" data-ga-from="${esc(fromId)}" data-ga-to="${esc(u.id)}" data-ga-dest="${u.external ? 'external' : 'internal'}">Check ${esc(u.name)} status${u.external ? ' &#8599;' : ' &rarr;'}</a></div>`
+    ? `<div style="margin-top:6px"><a class="mono" style="font-size:11px" href="${esc(u.href)}"${u.external ? ' target="_blank" rel="noopener noreferrer"' : ''} data-ga="${gaEvent}" data-ga-loc="is_down_page" data-ga-from="${esc(fromId)}" data-ga-to="${esc(u.id)}" data-ga-dest="${u.external ? 'external' : 'internal'}">Check ${esc(u.name)} status${u.external ? ' &#8599;' : ' &rarr;'}</a></div>`
     : ''
   return `<div style="padding:4px 0">
 <div style="display:flex;align-items:center;gap:8px">
@@ -1120,6 +1123,18 @@ export function renderUpstreamNote(note: UpstreamNoteLike | null | undefined, di
 <div class="mono" style="font-size:12px;color:#8b949e;margin-bottom:8px">${esc(displayName)}&rsquo;s status page attributes &ldquo;${esc(note.incidentTitle)}&rdquo; to an upstream provider, which is reporting its own incident:</div>
 ${note.upstream.map((u) => upstreamRow(u, displayName, note.fromId)).join('')}
 </div>`
+}
+
+// #1991 — the Likely Shared Cause card: the Related Upstream card's frame and rows, but each row is another
+// provider's open incident naming the same third party. The lead
+// sentence names this page's own incident.
+export function renderSharedUpstreamNotes(notes: SharedUpstreamNote[], displayName: string): string {
+  return notes.map((n) => `<div class="card" data-shared-upstream="${esc(n.key)}" style="border-left:3px solid #d29922">
+<div class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:10px">Likely Shared Cause</div>
+<div class="mono" style="font-size:12px;color:#8b949e;margin-bottom:8px">${esc(displayName)}&rsquo;s incident &ldquo;${esc(n.incidentTitle)}&rdquo; mentions ${esc(n.name)}, and so ${n.peers.length === 1 ? 'does an open incident' : 'do open incidents'} from:</div>
+${n.peers.map((u) => upstreamRow(u, displayName, n.fromId, 'shared_cause_link')).join('')}
+<div style="margin-top:8px"><a class="mono" style="font-size:11px" href="${esc(n.statusUrl)}" target="_blank" rel="noopener noreferrer" data-ga="shared_cause_link" data-ga-loc="is_down_page" data-ga-from="${esc(n.fromId)}" data-ga-to="${esc(n.key)}" data-ga-dest="external">Check ${esc(n.name)} status &#8599;</a></div>
+</div>`).join('\n')
 }
 
 // ── Region recommendation (refs #422 Phase 2) ─────────────────────────

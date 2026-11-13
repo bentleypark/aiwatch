@@ -1,7 +1,6 @@
 // #1991 — services from different providers whose live incidents name the same third party: a likely
 // shared upstream cause, which the dashboard otherwise shows as unrelated cards. Unlike
-// `upstream-link.ts` it needs no declared dependency and no feed for the third party: on 2026-11-12
-// Microsoft's public post came ~12h after claude.ai's incident (measured in #1991).
+// `upstream-link.ts` it needs no declared dependency and no feed for the third party.
 
 import type { Incident, ServiceStatus } from './types'
 import { causalIncidents } from './incident-text'
@@ -43,25 +42,34 @@ export function blameText(inc: Pick<Incident, 'title' | 'timeline'>): string {
     .join(' ')
 }
 
+/** Services read from another provider's status page (grokbot: Cursor's) take no part: their posts are not
+ *  their own provider's report. */
+export const MIRROR_SERVICES = ['grokbot']
+
 export interface SharedUpstreamGroup {
   thirdParty: Pick<ThirdParty, 'key' | 'name' | 'statusUrl'>
-  services: Array<Pick<ServiceStatus, 'id' | 'name' | 'provider'>>
+  /** each service with the live incident that names the third party */
+  services: Array<Pick<ServiceStatus, 'id' | 'name' | 'provider' | 'status'> & { incidentTitle: string; startedAt: string }>
 }
 
-/** Third parties named by live incidents of services from at least two different providers. */
+/** Third parties named by live incidents of services from at least two providers. */
 export function sharedUpstreamGroups(
-  services: Array<Pick<ServiceStatus, 'id' | 'name' | 'provider' | 'incidents'>>,
+  services: Array<Pick<ServiceStatus, 'id' | 'name' | 'provider' | 'status' | 'incidents'>>,
   thirdParties: ThirdParty[] = THIRD_PARTIES,
 ): SharedUpstreamGroup[] {
   const groups: SharedUpstreamGroup[] = []
   for (const tp of thirdParties) {
-    const naming = services.filter((s) =>
-      !tp.ownerProviders.includes(s.provider) &&
-      causalIncidents(s).some((c) => namesThirdParty(blameText(c.inc), tp.aliases)))
+    const naming: SharedUpstreamGroup['services'] = []
+    for (const s of services) {
+      if (MIRROR_SERVICES.includes(s.id) || tp.ownerProviders.includes(s.provider)) continue
+      const inc = causalIncidents(s).find((c) => namesThirdParty(blameText(c.inc), tp.aliases))?.inc
+      if (!inc) continue
+      naming.push({ id: s.id, name: s.name, provider: s.provider, status: s.status, incidentTitle: inc.title, startedAt: inc.startedAt })
+    }
     if (new Set(naming.map((s) => s.provider)).size < 2) continue
     groups.push({
       thirdParty: { key: tp.key, name: tp.name, statusUrl: tp.statusUrl },
-      services: naming.map(({ id, name, provider }) => ({ id, name, provider })),
+      services: naming,
     })
   }
   return groups.sort((a, b) => b.services.length - a.services.length)

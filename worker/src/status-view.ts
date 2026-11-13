@@ -1,6 +1,7 @@
 // #1831 — per-page projections of the lean /api/status/cached payload. The Edge is-down pages read one
 // of these instead of the whole payload; the rank and the fallbacks are computed here, once.
 
+import { sharedUpstreamGroups, type SharedUpstreamGroup } from './shared-upstream'
 import { CAPABILITY_LABEL, routedCapability, selectFallbacks, type FallbackCandidate } from './fallback'
 
 export type StatusView =
@@ -105,16 +106,20 @@ export interface IsDownView<S extends ViewService = ViewService> {
   aiAnalysis?: Record<string, unknown[]>
   supplyChainBanner?: unknown
   upstreamLinks?: unknown[]
+  sharedUpstream: SharedUpstreamGroup[]
   recoveryBaseline?: Record<string, unknown>
   estimateAccuracy?: unknown
 }
+
+const sharedUpstream = (services: ViewService[]): SharedUpstreamGroup[] =>
+  sharedUpstreamGroups(services as unknown as Parameters<typeof sharedUpstreamGroups>[0])
 
 /** One is-down page: the target (with its rank), its fallbacks, and only its own share of the
  *  payload-wide maps. An unknown id yields no service, which the page reports as `service_missing`. */
 export function buildIsDownView<S extends ViewService>(payload: LeanStatusPayload<S>, id: string): IsDownView<S> {
   const base = { lastUpdated: payload.lastUpdated, cached: payload.cached }
   const target = payload.services.find((s) => s.id === id)
-  if (!target) return { ...base, services: [] }
+  if (!target) return { ...base, services: [], sharedUpstream: [] }
   const rank = rankInTier(payload.services, target)
   const selection = selectFallbacks(id, target.category, payload.services)
   const routedCap = routedCapability(target)
@@ -129,6 +134,7 @@ export function buildIsDownView<S extends ViewService>(payload: LeanStatusPayloa
     ...(analyses ? { aiAnalysis: { [id]: analyses } } : {}),
     ...(payload.supplyChainBanner ? { supplyChainBanner: payload.supplyChainBanner } : {}),
     upstreamLinks: payload.upstreamLinks ?? [],
+    sharedUpstream: sharedUpstream(payload.services),
     ...(baseline ? { recoveryBaseline: { [id]: baseline } } : {}),
     ...(payload.estimateAccuracy ? { estimateAccuracy: payload.estimateAccuracy } : {}),
   }
