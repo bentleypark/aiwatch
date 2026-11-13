@@ -104,6 +104,8 @@ const en = {
   'overview.banner.outboundNote': '↗ opens the provider site · ranked by AIWatch Score, not paid',
   'overview.banner.openAlt': 'Open ↗',
   'overview.banner.regionSwitch': 'Switch region:',
+  'overview.banner.sharedUpstream': 'Likely shared cause — {name}, reported by',
+  'overview.banner.sharedUpstreamStatus': '{name} status',
   'overview.banner.viewIssues': 'View Issues tab for details',
   'overview.banner.viewIncidents': 'View incident details',
   'overview.banner.investigatingCount': 'Investigating ({n}):',
