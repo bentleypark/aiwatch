@@ -507,10 +507,10 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
                 type="button"
                 data-testid="affected-member"
                 onClick={() => onSelect(svc)}
-                className="w-full text-left flex flex-col rounded hover:bg-[var(--bg2)] transition-colors"
+                className="-mx-2 w-[calc(100%+16px)] text-left flex flex-col rounded hover:bg-[var(--bg2)] transition-colors"
                 style={{ padding: '6px 8px', minHeight: '32px', gap: '2px' }}
               >
-                <span className="flex items-center justify-between gap-2">
+                <span className="flex w-full min-w-0 items-center justify-between gap-2">
                   <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">
                     {svc.name}
                     <span className="mono text-[10px] text-[var(--text2)]" style={{ marginLeft: '8px' }}>{svc.provider}</span>

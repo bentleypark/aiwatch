@@ -864,14 +864,14 @@ export default function ServiceDetails({ serviceId }) {
     <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Section Title + Back Button ── */}
-      <div className="flex items-center justify-between">
-        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2 min-w-0" style={{ letterSpacing: '0.1em' }}>
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.services')} / {service.name}
         </h2>
         <button
           onClick={() => setPage({ name: 'overview' })}
-          className="btn-topbar"
+          className="btn-topbar whitespace-nowrap shrink-0"
           style={{ fontSize: '11px', padding: '4px 10px' }}
         >
           ← {t('nav.overview')}
@@ -879,19 +879,19 @@ export default function ServiceDetails({ serviceId }) {
       </div>
 
       {/* ── Header Card ── */}
-      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg flex justify-between items-start"
-           style={{ padding: '18px 20px' }}>
-        <div>
+      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg flex flex-col md:flex-row md:justify-between md:items-start"
+           style={{ padding: '18px 20px', gap: '10px' }}>
+        <div className="min-w-0">
           <h1 className="text-xl font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>{service.name}</h1>
           <div className="mono text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{service.provider}</div>
-          <div className="flex items-center" style={{ gap: '14px' }}>
+          <div className="flex flex-wrap items-center" style={{ gap: '6px 14px' }}>
             {statusSources.map(({ url, labelKey }) => (
               <a
                 key={url}
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1"
+                className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1 whitespace-nowrap"
               >
                 ↗ {t(labelKey)}
               </a>
@@ -900,7 +900,7 @@ export default function ServiceDetails({ serviceId }) {
             {feedUrl && <RssLink feedUrl={feedUrl} serviceId={service.id} t={t} />}
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {/* #1104 — a recovery marker alone is not enough. It is per-INCIDENT, but this chip is a claim
               about the SERVICE, and "one incident recovered while another is still open" is ordinary now
               that the worker keeps an incident past our own component's recovery. Ungated, this chip sat
@@ -911,7 +911,7 @@ export default function ServiceDetails({ serviceId }) {
           <button
             type="button"
             onClick={() => setReportOpen(true)}
-            className="mono text-[9px] uppercase rounded border border-[var(--border)] text-[var(--text2)] hover:text-[var(--text0)]"
+            className="mono text-[9px] uppercase rounded border border-[var(--border)] text-[var(--text2)] hover:text-[var(--text0)] whitespace-nowrap"
             style={{ padding: '3px 8px', letterSpacing: '0.04em' }}
           >
             ⚠ {t('report.button')}
