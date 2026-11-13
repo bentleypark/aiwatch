@@ -13,6 +13,7 @@ import { audienceBeaconScript } from '../_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from '../_shared/history-link'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
+import { lastedLine, resolvedDurationMin } from '../../worker/src/prediction-accuracy'
 import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
@@ -53,8 +54,7 @@ function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimate
 /** #1003 — the bound a RESOLVED incident is SCORED against: the first, hindsight-free estimate.
  *  Mirrors the worker `scoringBaselineHours` (incident-history.ts) exactly — NUMERIC fields only, no
  *  display-string parse, so this SEO card and the Discord/`/feed`/corpus verdicts can never disagree
- *  about the same incident (and a resolved card with no numeric estimate keeps falling back to the
- *  bare "Est. Recovery", as before).
+ *  about the same incident.
  *
  *  `estimatedRecoveryHours` is the CURRENT estimate, which the worker's re-analysis ratchets upward
  *  once an incident outruns its own prediction — scoring against it turns the model's misses into wins.
@@ -70,8 +70,8 @@ function scoringBaselineEn(insight: { estimatedRecoveryHours?: number; firstEsti
 
 /** True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
  *  short range is no longer credible (a 2–4h estimate on an incident ongoing for days). Mirrors the
- *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt` (a resolved
- *  surface shows predicted-vs-actual instead), a usable bound, and a startedAt. */
+ *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt`, a usable
+ *  bound, and a startedAt. */
 function recoveryEstimateExceeded(
   insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null | undefined,
 ): boolean {
@@ -80,6 +80,14 @@ function recoveryEstimateExceeded(
   if (bound == null || !insight.startedAt) return false
   const elapsed = Date.now() - new Date(insight.startedAt).getTime()
   return Number.isFinite(elapsed) && elapsed > 0 && elapsed > bound * 3_600_000
+}
+
+function recoveryClauseEn(insight: { estimatedRecovery: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string }): string {
+  if (insight.resolvedAt) {
+    const lasted = lastedLine(insight, insight, 'en')
+    return lasted ? ` Lasted ${lasted.value}.` : ''
+  }
+  return ` Est. recovery: ${recoveryEstimateExceeded(insight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(insight.estimatedRecovery)}.`
 }
 
 /** Whole-unit elapsed label ("12h" / "40m") — mirrors the frontend `approxElapsedText` (EN). */
@@ -1020,9 +1028,9 @@ function renderInsightBody(insight: AIInsight, multi: boolean, idx: number): str
   // "Est. Recovery" directly above its own "✅ Recovered 40m ago" line. `insight.resolvedAt` is the
   // same field that line already keys on, so gating both on it is what makes the block self-consistent.
   const baseline = scoringBaselineEn(insight)
-  const outcome = baseline != null && insight.startedAt && insight.resolvedAt
-    ? predictedVsActualEn(baseline, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
-    : null
+  const actualMin = resolvedDurationMin(insight, insight)
+  const outcome = baseline != null && actualMin != null ? predictedVsActualEn(baseline, actualMin) : null
+  const lasted = lastedLine(insight, insight, 'en')
   const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''
   const titleLine = multi && insight.incidentTitle
     ? `<div class="mono" style="font-size:10px;color:#8b949e;font-weight:600;margin-bottom:4px">${insight.resolvedAt ? '✅' : '🔸'} ${esc(insight.incidentTitle)}</div>`
@@ -1032,7 +1040,9 @@ ${titleLine}<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
 ${outcome
   ? `<span>🎯 <strong style="color:#c9d1d9">Predicted vs actual:</strong> ${esc(outcome)}</span>`
-  : `<span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>`}
+  : lasted
+    ? `<span>⏱ <strong style="color:#c9d1d9">${lasted.label}:</strong> ${esc(lasted.value)}</span>`
+    : insight.resolvedAt ? '' : `<span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>`}
 ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">Scope:</strong> ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
 ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>
@@ -1655,8 +1665,7 @@ export function buildMetaDescription(
 ): string {
   if (aiInsight && service && service.status !== 'operational' && !isStatusUnknown(service)) {
     const a = statusAnswer(service.status)
-    const recovery = recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)
-    return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${recovery}.`
+    return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)}${recoveryClauseEn(aiInsight)}`
   }
   if (!service) {
     return `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
@@ -1922,8 +1931,7 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
 
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
-  const aiRecovery = aiInsight ? (recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)) : ''
-  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${aiRecovery}.` : ''
+  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}.${recoveryClauseEn(aiInsight)}` : ''
   const n = seo.displayName
   const downTexts = [
     `Is ${n} down? Current status: Down.`,

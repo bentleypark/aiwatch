@@ -175,15 +175,23 @@ describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
     expect(html).toContain('2h 44m (over ~1h est.)') // actual exceeded the ~1h estimate
     expect(html).not.toContain('Est. Recovery:') // superseded by the comparison once resolved
   })
-  it('falls back to "Est. Recovery" when not resolved, or when no numeric estimate / startedAt', () => {
-    // active service → still the estimate
+  it('shows "Est. Recovery" only while the incident is not resolved', () => {
     const active = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], { ...resolvedInsight, resolvedAt: undefined })
     expect(active).toContain('Est. Recovery:')
     expect(active).not.toContain('Predicted vs actual:')
-    // resolved but missing the numeric estimate → estimate fallback
-    const noHours = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], { ...resolvedInsight, estimatedRecoveryHours: undefined })
-    expect(noHours).toContain('Est. Recovery:')
-    expect(noHours).not.toContain('Predicted vs actual:')
+  })
+
+  it('#1993 — resolved with no numeric estimate: how long it lasted, never a stale estimate', () => {
+    const na = { ...resolvedInsight, estimatedRecovery: 'N/A', estimatedRecoveryHours: undefined }
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], na)
+    expect(html).toContain('Lasted:</strong> 2h 44m')
+    expect(html).not.toContain('Est. Recovery:')
+    expect(html).not.toContain('Exceeded typical pattern</span>')
+    expect(html).not.toContain('Predicted vs actual:')
+    const noStart = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], { ...na, startedAt: undefined })
+    expect(noStart).not.toContain('Lasted:')
+    expect(noStart).not.toContain('Est. Recovery:')
+    expect(noStart).toContain('✅ Recovered:')
   })
 })
 
@@ -2084,5 +2092,38 @@ describe('renderEstimateAccuracy (#1205)', () => {
     expect(renderEstimateAccuracy(undefined)).toBe('')
     expect(renderEstimateAccuracy({ ...accuracy, total: 29, accurate: 9 })).toBe('')
     expect(renderEstimateAccuracy({ ...accuracy, since: 'soon' })).toBe('')
+  })
+})
+
+describe('#1993 — meta description and share text on a resolved insight', () => {
+  const at = (minAgo: number) => new Date(Date.now() - minAgo * 60000).toISOString()
+  // Hugging Face 1124142: analysed "N/A", resolved 2h 16m after it started; the service is still degraded.
+  const resolvedNa = { summary: 'CDN instability.', estimatedRecovery: 'N/A', affectedScope: [], startedAt: at(196), resolvedAt: at(60) }
+  const liveNa = { ...resolvedNa, resolvedAt: undefined }
+  const svc = mkService({ status: 'degraded' })
+  const share = (insight: typeof resolvedNa | typeof liveNa) => renderShareButtons(mkSeo(), svc, 'https://ai-watch.dev/is-claude-down', 'https://ai-watch.dev/og.png', insight)
+
+  it.each([
+    ['meta', () => buildMetaDescription(mkSeo(), svc, resolvedNa)],
+    ['share', () => share(resolvedNa)],
+  ])('%s: resolved says how long it lasted, never an estimate', (_, render) => {
+    const out = render()
+    expect(out).toContain('Lasted 2h 16m.')
+    expect(out).not.toContain('Est. recovery')
+  })
+
+  it.each([
+    ['meta', () => buildMetaDescription(mkSeo(), svc, liveNa)],
+    ['share', () => share(liveNa)],
+  ])('%s: live keeps its estimate', (_, render) => {
+    const out = render()
+    expect(out).toContain('Est. recovery: Exceeded typical pattern.')
+    expect(out).not.toContain('Lasted')
+  })
+
+  it('meta: resolved with no start says neither', () => {
+    const out = buildMetaDescription(mkSeo(), svc, { ...resolvedNa, startedAt: undefined })
+    expect(out).not.toContain('Est. recovery')
+    expect(out).not.toContain('Lasted')
   })
 })

@@ -165,7 +165,7 @@ export default async function handler(req: Request) {
           // the analysis. Incidents live on the fetched SERVICE (`target`), NOT the slug-config
           // `entry` (which has no `incidents`). `target` may be undefined on the `service_missing`
           // config-drift path (which doesn't return) while `aiAnalysis` still has an entry — optional-
-          // chain so we never throw to the fallback render; absent → the card shows the bare estimate.
+          // chain so we never throw to the fallback render.
           const incidents = (target?.incidents as Array<{ id?: string; startedAt?: string; title?: string }> | undefined) ?? []
           aiInsights = analysisList
             .map(a => {
