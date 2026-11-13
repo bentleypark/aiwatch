@@ -14,6 +14,7 @@ import { resolveWorkerApi } from './_shared/worker-api'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
 import { buildUpstreamNote, type UpstreamLinkLike, type UpstreamNote } from './_is-down/upstream-note'
+import { buildSharedUpstreamNotes, type SharedUpstreamGroupLike, type SharedUpstreamNote } from './_is-down/shared-upstream-note'
 
 export const config = { runtime: 'edge' }
 
@@ -83,6 +84,7 @@ export default async function handler(req: Request) {
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: SupplyChainNote | null = null
     let upstreamNote: UpstreamNote | null = null
+    let sharedUpstreamNotes: SharedUpstreamNote[] = []
     let recoveryBaseline: RecoveryBaseline | null = null
     let estimateAccuracy: EstimateAccuracy | null = null
     // Track the precise reason for the fallback render so the Discord alert can
@@ -125,6 +127,7 @@ export default async function handler(req: Request) {
           // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
           // itself down). Optional: a worker predating #1053 omits the key entirely (deploy skew).
           upstreamLinks?: UpstreamLinkLike[]
+          sharedUpstream?: SharedUpstreamGroupLike[]
           recoveryBaseline?: Record<string, RecoveryBaseline>
           estimateAccuracy?: EstimateAccuracy
           fallbacks?: typeof fallbacks
@@ -183,6 +186,7 @@ export default async function handler(req: Request) {
         supplyChainNote = buildSupplyChainNote(data.supplyChainBanner, entry.id)
         // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
         upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
+        sharedUpstreamNotes = buildSharedUpstreamNotes(data.sharedUpstream, entry.id, upstreamNote)
         recoveryBaseline = data.recoveryBaseline?.[entry.id] ?? null
         estimateAccuracy = data.estimateAccuracy ?? null
       } catch (parseErr) {
@@ -238,7 +242,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, (serviceData === null || viewMissing) && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups, estimateAccuracy)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel, recoveryBaseline, (serviceData === null || viewMissing) && !EXCLUDE_FALLBACK.includes(entry.id), fallbackGroups, estimateAccuracy, sharedUpstreamNotes)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

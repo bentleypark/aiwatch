@@ -113,8 +113,9 @@ export const ALWAYS_LOADED = ['CLAUDE.md', '.claude/hooks/workflow-gates.txt']
  *  row for evidence-line-gate.mjs (+144). The gate text is what the model reads before it writes; the
  *  Stop hook only checks the line exists.
  *  46_813 → 47_061 (#1974): the hook table gains a row for service-add-gate.mjs and the evidence-line row names
- *  its Step-0 clause. */
-export const BUDGET_CHARS = 47_062
+ *  its Step-0 clause.
+ *  47_062 → 47_188 (#1991): the directory layout gains a line for the new module shared-upstream.ts. */
+export const BUDGET_CHARS = 47_188
 
 /** A ratchet only ratchets if it is tight. Left with headroom it permits exactly the drift it exists
  *  to stop, so a REDUCTION that opens more than this much slack fails too, and the same PR lowers the

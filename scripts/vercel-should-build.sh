@@ -18,11 +18,13 @@ diff_exit=0
 # The worker/ files src/ and api/ import; scripts/vercel-should-build.test.mjs fails when one is missing.
 WORKER_IMPORTS=(
   worker/src/fallback.ts
+  worker/src/incident-text.ts
   worker/src/last-good-copy-path.ts
   worker/src/maintenance-phase.ts
   worker/src/prediction-accuracy.ts
   worker/src/probe.ts
   worker/src/recovery-baseline-text.ts
+  worker/src/shared-upstream.ts
   worker/src/status-verdict.ts
   worker/src/status-view.ts
   worker/src/utils.ts

@@ -103,6 +103,8 @@ const ko = {
   'overview.banner.outboundNote': '↗ 제공사 사이트로 이동 · AIWatch Score 기준(광고 아님)',
   'overview.banner.openAlt': '열기 ↗',
   'overview.banner.regionSwitch': '리전 전환:',
+  'overview.banner.sharedUpstream': '공통 원인 가능성 — {name}, 보고한 서비스:',
+  'overview.banner.sharedUpstreamStatus': '{name} 상태',
   'overview.banner.viewIssues': 'Issues 탭에서 확인',
   'overview.banner.viewIncidents': '인시던트 상세 확인',
   'overview.banner.investigatingCount': '조사 중 ({n}):',

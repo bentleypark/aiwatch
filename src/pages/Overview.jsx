@@ -31,6 +31,7 @@ import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
 import { buildAffectedEntries, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../utils/affectedServices'
+import { sharedUpstreamGroups } from '../../worker/src/shared-upstream'
 import { rowHighlight } from '../utils/rowHighlight'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
 
@@ -659,6 +660,7 @@ export function ActionBanner({ services, setPage, t, lang }) {
   // switch shown above, so a cross-provider fallback alongside it is redundant noise). Per-service:
   // an affected service without a region switch keeps its cross-service fallback. Helper is unit-tested.
   const categoryGroups = getGroupedFallbacksExcludingRegionSwitchable(affected, services)
+  const sharedCauses = sharedUpstreamGroups(services)
 
   return (
     <div
@@ -690,6 +692,21 @@ export function ActionBanner({ services, setPage, t, lang }) {
           👀 <span className="text-[var(--blue)]">{t('overview.banner.monitoringCount').replace('{n}', monitoring.length)}</span> {renderNames(monitoring)}
         </div>
       )}
+      {sharedCauses.map((grp) => (
+        <div key={grp.thirdParty.key} data-testid="shared-upstream" className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '4px' }}>
+          🔗 {t('overview.banner.sharedUpstream').replace('{name}', grp.thirdParty.name)}{' '}
+          {grp.services.map((s, i) => (
+            <span key={s.id}>
+              {i > 0 && ', '}
+              <span className="text-[var(--text0)] hover:underline cursor-pointer" onClick={() => setPage({ name: 'service', serviceId: s.id })}>{s.name}</span>
+            </span>
+          ))}
+          {' · '}
+          <a href={grp.thirdParty.statusUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--blue)] hover:underline whitespace-nowrap">
+            {t('overview.banner.sharedUpstreamStatus').replace('{name}', grp.thirdParty.name)} ↗
+          </a>
+        </div>
+      ))}
       {(withActiveIncidents.length > 0 || affected.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))) && (
         <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
           <button
