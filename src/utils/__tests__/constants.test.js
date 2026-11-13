@@ -246,13 +246,13 @@ describe('#1725 — frontend: a source that requires a capability admits only th
     expect(getGroupedFallbacks([perplexity], services).map((g) => g.label)).toEqual(['Embeddings'])
   })
 
-  it('grouped: Perplexity and Cohere down together get separate pools, whichever is listed first', () => {
+  it('grouped: Perplexity and Cohere down together show OpenAI API once, under both labels, whichever is listed first (#1987)', () => {
+    // Cohere's substitute list and the search providers are the same five ids, so both groups show the same item.
     const services = board.map((s) => (s.id === 'cohere' ? { ...s, status: 'down' } : s))
     const [perplexity, cohere] = [services[0], services[1]]
     const byLabel = (groups) => Object.fromEntries(groups.map((g) => [g.label, g.items.map((f) => f.name)]))
     const forward = byLabel(getGroupedFallbacks([perplexity, cohere], services))
-    expect(Object.keys(forward).sort()).toEqual(['LLM', 'LLM (web search)'])
-    expect(forward['LLM (web search)']).toEqual(['OpenAI API'])
+    expect(forward).toEqual({ 'LLM + LLM (web search)': ['OpenAI API'] })
     expect(byLabel(getGroupedFallbacks([cohere, perplexity], services))).toEqual(forward)
   })
 })
@@ -828,7 +828,7 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
     expect(groups[0].items.map(i => i.id)).toEqual(['stability', 'bfl'])
   })
 
-  it('a routed anchor and a PLAIN outage of the same tier stay SEPARATE — their pools differ', () => {
+  it('a routed anchor and a PLAIN outage of the same tier keep SEPARATE pools', () => {
     // This surface is the one that reaches the shape: Overview passes the WHOLE affected board. Merging
     // them by capability or by specialized tier looks tidier and saves a perGroup slot, but the pools
     // are not the same — facet C admits `openai` for a plain Stability outage while the routed branch
@@ -839,12 +839,35 @@ describe('#1119 — frontend mirror: a ROUTED outage crosses the category bounda
     const services = [cg, stabilityDown, op('bfl', 'api', 'Black Forest Labs (FLUX)', 65), op('openai', 'api', 'OpenAI API', 99), ...pool.filter(s => s.id !== 'stability' && s.id !== 'bfl')]
     for (const order of [[cg, stabilityDown], [stabilityDown, cg]]) {
       const groups = getGroupedFallbacks(order, services)
-      expect(groups).toHaveLength(2)
-      expect(groups.find(g => g.capability === 'image').items.map(i => i.id)).toEqual(['bfl'])
-      expect(groups.find(g => g.capability === undefined).items.map(i => i.id)).toEqual(['bfl'])
+      // #1987 — both pools put FLUX first, so the cut shows the same item twice: one line, both labels.
+      expect(groups).toEqual([expect.objectContaining({ label: 'Image + Image generation', capability: 'image' })])
+      expect(groups[0].items.map(i => i.id)).toEqual(['bfl'])
     }
     expect(getFallbacks(stabilityDown, services).map(f => f.id)).toContain('openai')
     expect(getFallbacks(cg, services).map(f => f.id)).not.toContain('openai')
+  })
+
+  it('#1987 — the 2026-11-12 banner: routed OpenAI Images + plain Image outages show Stability AI once, not under two labels', () => {
+    const oa = {
+      id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 75, incidents: [],
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'degraded' }],
+    }
+    const replicate = { id: 'replicate', category: 'api', name: 'Replicate', status: 'degraded', aiwatchScore: 60, incidents: [] }
+    const bflDown = { id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', status: 'degraded', aiwatchScore: 65, incidents: [] }
+    const services = [oa, replicate, bflDown, ...pool.filter(s => s.id !== 'bfl')]
+    const groups = getGroupedFallbacks([oa, replicate, bflDown], services)
+    const shown = groups.flatMap(g => g.items.map(i => i.id))
+    expect(shown.filter(id => id === 'stability')).toHaveLength(1)
+    expect(new Set(shown).size).toBe(shown.length)
+    expect(groups.find(g => g.items.some(i => i.id === 'stability')).label).toBe('Image + Image generation')
+  })
+
+  it('#1987 — groups whose shown items DIFFER are both kept', () => {
+    const cg = chatgpt(['Image Generation'])
+    const llmDown = { id: 'claude', category: 'api', name: 'Claude API', status: 'down', aiwatchScore: 95, incidents: [] }
+    const groups = getGroupedFallbacks([cg, llmDown], [cg, llmDown, ...pool.filter(s => s.id !== 'claude')])
+    expect(groups).toHaveLength(2)
+    expect(groups.every(g => g.items.length === 1)).toBe(true)
   })
 
   it('an AGENT-category source routes too — documented as intended, not an oversight', () => {
@@ -980,8 +1003,18 @@ describe('#1698 — an OpenRouter TTS-only or STT-only outage recommends that ha
     const audio = { id: 'openai', category: 'api', status: 'degraded', aiwatchScore: 90, incidents: [],
       components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }] }
     const tts = openrouter('TTS')
-    const groups = getGroupedFallbacks([audio, tts], [audio, tts, ...voice])
+    // AssemblyAI tops the general-audio pool, so the two groups show different items.
+    const ranked = voice.map((v) => (v.id === 'assemblyai' ? { ...v, aiwatchScore: 100 } : v))
+    const groups = getGroupedFallbacks([audio, tts], [audio, tts, ...ranked])
     expect(groups.map((g) => g.label)).toEqual(['Audio / speech', 'Text to speech'])
+    expect(groups.map((g) => g.items.map((f) => f.id))).toEqual([['assemblyai'], ['elevenlabs']])
+  })
+  it('#1987 — when both audio groups show the same service, the line carries both labels intact', () => {
+    const audio = { id: 'openai', category: 'api', status: 'degraded', aiwatchScore: 90, incidents: [],
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }] }
+    const tts = openrouter('TTS')
+    const groups = getGroupedFallbacks([audio, tts], [audio, tts, ...voice])
+    expect(groups.map((g) => [g.label, g.items.map((f) => f.id)])).toEqual([['Audio / speech + Text to speech', ['elevenlabs']]])
   })
 })
 
@@ -996,6 +1029,16 @@ describe('#1753 — frontend: listed services recommend their substitute lists',
   it('DeepSeek recommends a host serving its models and a general LLM API, not the higher-scored hosts or vendors', () => {
     const deepseek = down('deepseek', 'DeepSeek API')
     expect(getFallbacks(deepseek, [deepseek, ...board]).map(f => f.name)).toEqual(['Fireworks AI', 'Claude API'])
+  })
+
+  it('#1987 — DeepSeek and Kimi down together keep both host labels on one line, whichever is listed first', () => {
+    const deepseek = down('deepseek', 'DeepSeek API')
+    const kimi = down('kimi', 'Kimi API')
+    const services = [deepseek, kimi, ...board.filter(s => s.id !== 'kimi')]
+    const byLabel = (groups) => Object.fromEntries(groups.map((g) => [g.label, g.items.map((f) => f.name)]))
+    const forward = byLabel(getGroupedFallbacks([deepseek, kimi], services))
+    expect(forward['DeepSeek models + Kimi models']).toEqual(['Fireworks AI'])
+    expect(byLabel(getGroupedFallbacks([kimi, deepseek], services))).toEqual(forward)
   })
 
   it('a listed candidate with an active incident or a stale source is never recommended', () => {
