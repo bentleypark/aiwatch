@@ -28,7 +28,7 @@ import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
 import { sourceFlagsOf, isDisplayAffected } from '../utils/statusDisplay'
-import { STATUS_URL } from '../utils/statusPageUrls'
+import { STATUS_URL, STATUS_SOURCES } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
@@ -60,16 +60,6 @@ const SERVICE_COLOR = {
   twelvelabs:  '#79c0ff',
 }
 
-
-// #717 — services whose status is sourced from MORE THAN ONE upstream status page. The worker
-// already merges both feeds (e.g. Gemini = AI Studio + Google Cloud / Vertex); this surfaces both
-// links so users can reach either source. Services absent here fall back to the single STATUS_URL.
-const STATUS_SOURCES = {
-  gemini: [
-    { url: 'https://aistudio.google.com/status', labelKey: 'svc.status.linkAistudio' },
-    { url: 'https://status.cloud.google.com',    labelKey: 'svc.status.linkGcloud' },
-  ],
-}
 
 // Services that cannot provide incident data (no API, bot-protected, etc.)
 const NO_INCIDENT_SUPPORT = new Set([])
@@ -809,8 +799,8 @@ export default function ServiceDetails({ serviceId }) {
   }
 
   const statusUrl = STATUS_URL[service.id]
-  // #717 — one anchor per upstream status source. Multi-source services (e.g. Gemini) use
-  // STATUS_SOURCES; everyone else renders the single STATUS_URL with the generic label.
+  // #717 — one anchor per STATUS_SOURCES entry; everyone else renders the single STATUS_URL with
+  // the generic label.
   const statusSources = STATUS_SOURCES[service.id] ?? (statusUrl ? [{ url: statusUrl, labelKey: 'svc.status.link' }] : [])
   // Per-service incident RSS feed (#432) — null for estimate-only services
   // (bedrock / azureopenai) that have no /is-*-down page or feed.

@@ -27,6 +27,7 @@ function uptimeScopeDescriptor(s: ServiceConfig): string {
   }
   if (s.awsHealthApi || s.azureRssUrl) return 'none'
   if (s.betterStackUrl) return `betterstack page resources except ${(s.componentDenylist ?? []).join(',') || 'none'}`
+  if (s.instatusUrl && s.uptimeOverDisplayComponents) return `instatus worst-of ${(s.displayComponentIds ?? []).join(',')}`
   if (s.instatusUrl && s.statusComponent) return `instatus name ${s.statusComponent}`
   return 'none'
 }
@@ -69,6 +70,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "langfuse": "incident.io 01KS5BHY7AKJD8YEM4MFYMB35Z,01KS5BHY7AX99XYA7AS7AAP7QG,01KS5BHY7AH52EZHZQ9TYD53TY",
         "langsmith": "incident.io 01KX6FV0RR5XXJ0SM3NXZRKMBY,01KX6FV0RRSSTKC5V2GPAMCEQR,01KX6FV0RRKA56PXCRWEHJTMXM,01KX6FV0RR46HM5EVSKG4BVY01,01KX6FV0RRY9DS9G7ZGB46MQQ2,01KX6FV0RRSDVTKHP03BBR1799,01KX6FV0RRHHPK0Y474ESRYV0X,01KX6FV0RR6F81Q8VM6KMACNXQ,01KX6FV0RR0E7AJPG60HR2ZTT9,01M26K8BYHD6NJP0PMEPB8S0RV",
         "luma": "betterstack page resources except Website",
+        "lyceum": "instatus worst-of cmsro18m100690zpmoooevk79,cmrjn3yjw02pv1bo2ap0pac7p,cmrjfshxl01bv0ko2mmt64j4e",
         "mistral": "rootly 38c479d8-b68b-4259-8361-0f52c7cc5abd,ca6957e1-6702-46d6-a315-c5c2705ea904,02854346-5ace-4d07-8060-fbce92868dee,040448d1-a48a-46a2-b902-738630eb3dc0,54557689-02de-44ef-93a0-b1623fd0e2d8,1682e120-dca1-4fea-b344-e2f8dd12ebd9,42f444f1-0899-4c61-8700-4deff117fbb9,f1e6b7cd-e1fc-44ab-8b7e-f3cfde127193,dd45369c-fe82-4a81-b177-248cecec6fd8,9bee7300-775f-4cb7-b181-d4efa024c4ca,ba78005e-a0b7-498b-8688-dd3529e9780c,5550b7f7-8d2b-4a86-89d7-d842c94f365a,9f221a35-eb8a-411d-8767-3686dbd7881d",
         "modal": "betterstack page resources except Website,Dashboard",
         "openai": "incident.io 01JMXBRMFE6N2NNT7DG6XZQ6PW,01JP8CD9JR3HR6Y7G4Q75N4DVW,01JMXBRMFEMZK0HPK19RYET250,01JMXBRMFEV0AJ0VVS68N9CD6R,01JMXBRMFE4MAP2BHSJNZ787WX,01JMXBRMFE5ESNNV8JDHVCGSRD,01JMXBRMFEKVBWKK82B44QFMCE,01JMXBRMFEVZ7E0X9GD9FWR9WX,01JMXBRMFEQW613TFE89F45035,01JMXBRMFESJCBGJR10PDD3WCQ,01JSM5RTJWHRWDTS6Q604VEW3B,01M3Q6W0264T1RJS1YEM47CAQJ,01M3Q6W0262E8VW5DE1MJMMN0T,01M534EG9N1SYV22NNJPRGYESP",

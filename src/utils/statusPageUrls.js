@@ -33,6 +33,7 @@ export const STATUS_URL = {
   jina:        'https://status.jina.ai',
   modal:       'https://status.modal.com',
   twelvelabs:  'https://status.twelvelabs.io',
+  lyceum:      'https://status.lyceum.technology',
   langsmith:   'https://global.status.smith.langchain.com/gcp-us',
   helicone:    'https://status.helicone.ai',
   langfuse:    'https://status.langfuse.com',
@@ -56,4 +57,18 @@ export const STATUS_URL = {
   windsurf:    'https://www.devinstatus.com',
   junie:       'https://status.jetbrains.cloud', // #1004 — moved off status.jetbrains.ai (Atlassian → incident.io)
   codex:       'https://status.openai.com',
+}
+
+// #717 — services that link MORE THAN ONE status page. Gemini's status merges two upstream feeds
+// (AI Studio + Google Cloud / Vertex), so both are linked. Services absent here fall back to the
+// single STATUS_URL.
+export const STATUS_SOURCES = {
+  gemini: [
+    { url: 'https://aistudio.google.com/status', labelKey: 'svc.status.linkAistudio' },
+    { url: 'https://status.cloud.google.com',    labelKey: 'svc.status.linkGcloud' },
+  ],
+  lyceum: [
+    { url: 'https://status.lyceum.technology', labelKey: 'svc.status.linkLyceum' },
+    { url: 'https://caspar.instatus.com',      labelKey: 'svc.status.linkLyceumInstatus' },
+  ],
 }

@@ -123,6 +123,7 @@
 | Jina AI | Jina AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + 가동률 API |
 | Twelve Labs | Twelve Labs | Atlassian Statuspage |
+| Lyceum | Lyceum | Instatus (Next.js) |
 
 ### 관측
 
@@ -357,6 +358,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
 | `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
+| `lyceum` | Lyceum | | |
 
 ## Claude Code Statusline 통합
 

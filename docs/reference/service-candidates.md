@@ -174,3 +174,9 @@ coverage-additive, **not** a fallback gap. Do not let them block the gap work ab
 - **Google Antigravity** — no official status page exists (only crowdsourced trackers, which the
   official-source-primary methodology cannot use), and the coding-agent category is already
   saturated at 6 monitored services. Declined 2026-07-17, not queued.
+
+## Inference / infra — Lyceum added (#1979)
+
+| Candidate | Status page | Platform | Monitorable |
+|---|---|---|---|
+| **Lyceum** | caspar.instatus.com (linked from status.lyceum.technology) | Instatus ✅ | Added in #1979; probe `GET /openai/v1/models` answers 401 |

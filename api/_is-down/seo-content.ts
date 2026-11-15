@@ -650,6 +650,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How often does Twelve Labs go down?', a: 'Twelve Labs uptime and incident history are tracked on this page. Check the recent incidents section and uptime percentage for current reliability data.' },
     ],
   },
+  lyceum: {
+    displayName: 'Lyceum',
+    description: 'Lyceum is an inference provider for open-source models. Its site describes running them through one API billed per token, and on dedicated GPUs as usage grows.',
+    insight: 'Lyceum publishes its status on an Instatus page, which AIWatch reads for uptime and incidents. AIWatch counts the inference API components (Model Inference, Serverless Inference API, API Gateway); the dashboard, website and docs are not counted.',
+    whenDown: 'When the Lyceum inference API is down, requests to its models fail or time out. If your application depends on Lyceum, check which of the counted components is affected on this page before changing anything.',
+    faqs: [
+      { q: 'Is Lyceum down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Lyceum every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
+      { q: 'How do I check Lyceum status?', a: 'You can check Lyceum status on this page (updated every 5 minutes), on the official status page at status.lyceum.technology, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What should I do when Lyceum is down?', a: 'If Lyceum is experiencing downtime, check the official status page for updates. For production workloads, retry with exponential backoff and keep a second inference provider configured.' },
+      { q: 'How often does Lyceum go down?', a: 'Lyceum uptime and incident history are tracked on this page. Check the recent incidents section and uptime percentage for current reliability data.' },
+    ],
+  },
 }
 
 export function getSEOContent(slug: string): ServiceSEO | null {
