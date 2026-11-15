@@ -4,6 +4,7 @@ import { useId, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useModalDialog } from '../hooks/useModalDialog'
 import { isDisplayAffected, displayStatusOf, groupWorstStatus } from '../utils/statusDisplay'
+import { groupAnalyses, baselineCards } from '../utils/analysisGroups'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { recoveryLine, scopeLine } from '../utils/predictionAccuracy'
 import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
@@ -23,71 +24,7 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
   const titleId = useId()
   const dialogRef = useRef(null)
   const accuracyLine = estimateAccuracyText(estimateAccuracy, lang)
-  // aiAnalysis: Record<svcId, AIAnalysisResult[]>
-  //
-  // Two-pass grouping (avoids cross-service bleed — see #315):
-  //   Pass 1: bucket by incidentId to collect which svcIds each incident affects.
-  //           Sibling services sharing an incident (e.g. Claude API + claude.ai + Claude Code
-  //           pointing at the same incidentId) collapse into one bucket here.
-  //   Pass 2: a multi-svc bucket becomes its own card. Single-svc buckets for the same svcId
-  //           merge into a single card so the service header and fallback block render once
-  //           even when a service has multiple distinct incidents (e.g. Together AI with two
-  //           concurrent model outages).
-  const byIncident = new Map()
-  for (const [svcId, rawAnalyses] of Object.entries(aiAnalysis)) {
-    const arr = Array.isArray(rawAnalyses) ? rawAnalyses : [rawAnalyses]
-    for (const a of arr) {
-      const incId = a.incidentId ?? svcId
-      const bucket = byIncident.get(incId)
-      if (bucket) {
-        if (!bucket.svcIds.includes(svcId)) bucket.svcIds.push(svcId)
-        continue
-      }
-      const svc = services.find(s => s.id === svcId)
-      const inc = svc?.incidents?.find(i => i.id === incId)
-      byIncident.set(incId, {
-        incId,
-        svcIds: [svcId],
-        analysis: a,
-        startedAt: inc?.startedAt ?? a.analyzedAt ?? '',
-      })
-    }
-  }
-
-  const groups = []
-  const singleSvcGroupByOwner = new Map() // svcId → group
-  for (const bucket of byIncident.values()) {
-    if (bucket.svcIds.length > 1) {
-      groups.push({
-        svcIds: bucket.svcIds,
-        incIds: new Set([bucket.incId]),
-        analyses: [bucket.analysis],
-        startedAt: bucket.startedAt,
-      })
-      continue
-    }
-    const ownerSvcId = bucket.svcIds[0]
-    const existing = singleSvcGroupByOwner.get(ownerSvcId)
-    if (existing) {
-      existing.incIds.add(bucket.incId)
-      existing.analyses.push(bucket.analysis)
-      // Keep the card anchored to the most recent incident in the group so sort places
-      // freshly erupting issues above long-running ones.
-      if (bucket.startedAt && bucket.startedAt > existing.startedAt) {
-        existing.startedAt = bucket.startedAt
-      }
-    } else {
-      const g = {
-        svcIds: [ownerSvcId],
-        incIds: new Set([bucket.incId]),
-        analyses: [bucket.analysis],
-        startedAt: bucket.startedAt,
-      }
-      singleSvcGroupByOwner.set(ownerSvcId, g)
-      groups.push(g)
-    }
-  }
-  groups.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  const groups = groupAnalyses(aiAnalysis, services)
   const hasGroups = groups.length > 0
 
   useModalDialog(dialogRef, hasGroups, onClose)
@@ -95,8 +32,7 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
   if (!hasGroups) return null
 
   const totalCount = groups.reduce((sum, g) => sum + g.analyses.length, 0)
-  const baselineCardOf = new Map()
-  groups.forEach((g, gi) => g.svcIds.forEach(id => { if (!baselineCardOf.has(id)) baselineCardOf.set(id, gi) }))
+  const baselineCardOf = baselineCards(groups)
   const accuracyCardGi = Math.max(0, groups.findIndex((g, gi) => g.svcIds.some(id => recoveryBaseline?.[id] && baselineCardOf.get(id) === gi)))
 
   return (
@@ -129,7 +65,6 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
           {groups.map(({ svcIds, analyses }, gi) => {
             const svcs = svcIds.map(id => services.find(s => s.id === id)).filter(Boolean)
             if (svcs.length === 0) return null
-            const worstStatus = groupWorstStatus(svcs)
             const isAllResolved = svcs.every(s => s.status === 'operational')
             // #1104 — the shared primitive, not a fourth hand-inlined copy of the same predicate.
             // Its guard shape (`Array.isArray`) also differs from the `?? []` this line used to carry,
@@ -173,8 +108,15 @@ export default function AnalysisModal({ aiAnalysis, recoveryBaseline, estimateAc
               <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc && !allRecovered ? 0.6 : 1 }}>
                 {/* Service header */}
                 <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: analyses.length > 1 ? '6px' : '8px' }}>
-                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: worstStatus === 'operational' ? 'var(--green)' : worstStatus === 'down' ? 'var(--red)' : worstStatus === 'unknown' ? 'var(--text2)' : 'var(--amber)' }} />
-                  <span className="text-[13px] font-medium text-[var(--text0)]">{svcs.map(s => s.name).join(', ')}</span>
+                  {svcs.map(s => {
+                    const st = groupWorstStatus([s])
+                    return (
+                      <span key={s.id} className="flex items-center gap-1.5" data-service-status={s.id}>
+                        <span className="w-[6px] h-[6px] rounded-full shrink-0" style={{ background: st === 'operational' ? 'var(--green)' : st === 'down' ? 'var(--red)' : st === 'unknown' ? 'var(--text2)' : 'var(--amber)' }} />
+                        <span className="text-[13px] font-medium text-[var(--text0)]">{s.name}</span>
+                      </span>
+                    )
+                  })}
                   {analyses.length > 1 && (
                     <span className="mono text-[9px] text-[var(--text2)]">({analyses.length} {lang === 'ko' ? '건' : 'incidents'})</span>
                   )}

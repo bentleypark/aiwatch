@@ -153,6 +153,7 @@ const SAFE = {
   'src/utils/recoveredGrouping.js': 'a rows EXISTENCE comes from the recovered: KV marker, and isMarkableOnStatusEdge (recovery-mark.ts) refuses to write one for a derived incident — so no row is ever built',
   'src/components/IncidentTimeline.jsx': 'renders the timeline it is given; the note prop covers the empty case',
   'src/components/AnalysisModal.jsx': 'renders an AI analysis, which a synthesized incident never has',
+  'src/utils/analysisGroups.js': 'matches services to an AI analysis by its incident id, which a synthesized incident never has',
   'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
   'src/components/Sidebar.jsx': 'active incident count only',
   'src/components/Topbar.jsx': 'active incident count only',
@@ -281,6 +282,7 @@ const RB_SAFE = {
   'worker/src/incident-history.ts': 'both callers already gate it before calling buildHistoryRecord — recovery-mark.ts\'s isMarkableOnStatusEdge refuses it, and alerts.ts\'s alerted:res: path only ever processes ids legitimately tracked start-to-finish',
   'worker/src/prediction-accuracy.ts': 'every entry point returns early without an ai:analysis — ai-analysis.ts (fixed) never analyzes a retainedBridge incident, so one is never present',
   'src/components/AnalysisModal.jsx': 'renders an AI analysis, which a retainedBridge incident never has (ai-analysis.ts excludes it from analysis entirely)',
+  'src/utils/analysisGroups.js': 'matches services to an AI analysis by its incident id; a retainedBridge copy carrying that id is the same incident',
   'src/utils/recoveredGrouping.js': 'a row\'s existence comes from the recovered: KV marker, which recovery-mark.ts (now fixed) refuses to write for a retainedBridge incident',
 
   // Reads nothing that could be wrong either way.
@@ -409,6 +411,7 @@ const SU_SAFE = {
   'worker/src/prediction-accuracy.ts': 'every entry point returns early when the analysis carries no `resolvedAt` (computePredictionOutcome), and markIncidentResolved refuses to stamp one for this shape — the same upstream-predicate property the other two axes rest on, not a claim about a different gate',
   'src/utils/recoveredGrouping.js': 'a row exists only because of the recovered: KV marker, and markIncidentResolved writes none for this shape. It does NOT read the marker\'s duration field — it subtracts the incident\'s own timestamp pair — so withholding the marker is what makes it safe, not clearing a field',
   'src/components/AnalysisModal.jsx': 'the predicted-vs-actual line comes from prediction-accuracy.ts, which returns early without a stamped analysis resolvedAt — and markIncidentResolved stamps none for this shape',
+  'src/utils/analysisGroups.js': 'reads only the incident id and startedAt for card order, never a duration',
   'src/components/IncidentTimeline.jsx': 'renders the timeline it is given; the note prop covers the empty case',
   'src/components/RecentUserReports.jsx': 'user-submitted reports, not provider incidents',
   'src/components/Sidebar.jsx': 'active incident count only',
@@ -466,7 +469,7 @@ describe('#1292 — every incident-field consumer is classified', () => {
     // 86 → 87: #1797 added worker/src/late-resolution.ts, which matches live resolved incidents to a past month's archive rows.
     // 87 → 88: #887 added worker/src/sitemap-feed.ts, which takes a service's latest incident instant as its sitemap lastmod.
     // 89 → 90: #1938 added worker/src/reissued-duplicates.ts, which names a possible duplicate pair in the archive-ready notice; SAFE on all three.
-    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(93)
+    expect(all.length, 'the detector drifted — it no longer matches what it did when this was pinned').toBe(94)
   })
 
   it('leaves none unclassified', () => {
@@ -520,7 +523,7 @@ describe('#1384 — every incident-field consumer is classified for retainedBrid
     // If this ever fails while the #1292 "finds the consumers" test above still passes at 76, the
     // count didn't change but a file moved in/out — impossible today (both axes scan identically),
     // kept as a canary in case that ever stops being true.
-    expect(all.length).toBe(93)
+    expect(all.length).toBe(94)
   })
 
   it('leaves none unclassified for retainedBridge', () => {
@@ -566,7 +569,7 @@ describe('#1390 — every incident-field consumer is classified for startUnknown
   const all = consumers()
 
   it('classifies every file the #1292 scan finds — same list, no drift between the three axes', () => {
-    expect(all.length).toBe(93)
+    expect(all.length).toBe(94)
   })
 
   it('leaves none unclassified for startUnknown', () => {

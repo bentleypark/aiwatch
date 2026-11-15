@@ -407,3 +407,38 @@ test.describe('AnalysisModal — estimate track record (#1205)', () => {
     await expect(modal.locator('.border-t [data-estimate-accuracy]')).toHaveCount(0)
   })
 })
+
+// #1997 — production 2026-11-13: an incident resolved on claude.ai and Claude Code while claude.ai is
+// down on a different live incident; the worker sends claude.ai's live analysis only.
+test('#1997 — a resolved shared card names a service that carries it but sent no analysis of it', async ({ page }) => {
+  const at = (minAgo) => new Date(Date.now() - minAgo * 60_000).toISOString()
+  const shared = { id: 'nn11wk485zfn', title: 'Elevated errors on claude.ai, Claude Code', status: 'resolved', impact: 'major', startedAt: at(150), resolvedAt: at(20), duration: null, timeline: [] }
+  const m365 = { id: 'sqn3fg1l96dl', title: 'Microsoft 365 connector errors', status: 'identified', impact: 'major', startedAt: at(1100), resolvedAt: null, duration: null, timeline: [] }
+  const BASELINE = { n: 41, medianMin: 40, p80Min: 90, since: '2026-07-12' }
+  const payload = {
+    services: [
+      { id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'down', latency: 0, incidents: [m365, shared] },
+      { id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational', latency: 0, incidents: [shared] },
+    ],
+    aiAnalysis: {
+      claudeai: [{ incidentId: 'sqn3fg1l96dl', summary: 'Microsoft 365 connector is failing.', estimatedRecovery: '1–3h', affectedScope: ['Connectors'], needsFallback: false, analyzedAt: at(30) }],
+      claudecode: [{ incidentId: 'nn11wk485zfn', summary: 'Authentication failures across Claude surfaces.', estimatedRecovery: '2h–2.5h', affectedScope: ['Authentication'], needsFallback: false, analyzedAt: at(140), resolvedAt: at(20) }],
+    },
+    recoveryBaseline: { claudeai: BASELINE, claudecode: BASELINE },
+    lastUpdated: new Date().toISOString(),
+  }
+  await page.route('**/api/status', (route) => route.fulfill({ json: payload }))
+  await page.route('**/api/status/cached', (route) => route.fulfill({ json: payload }))
+  await page.goto('/')
+  await expect(page.getByText('Claude Code').first()).toBeVisible({ timeout: 20000 })
+  await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+  const modal = page.locator('dialog')
+  await expect(modal).toBeVisible()
+  const card = (text) => modal.getByText(text).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]')
+  const sharedCard = card(/Authentication failures across Claude surfaces/)
+  await expect(sharedCard.locator('[data-service-status]')).toHaveText(['Claude Code', 'claude.ai'])
+  await expect(sharedCard.locator('[data-service-status="claudecode"] .rounded-full')).toHaveAttribute('style', /var\(--green\)/)
+  await expect(sharedCard.locator('[data-service-status="claudeai"] .rounded-full')).toHaveAttribute('style', /var\(--red\)/)
+  await expect(sharedCard.getByText('Resolved', { exact: true })).toHaveCount(0)
+  await expect(card(/Microsoft 365 connector is failing/).locator('[data-recovery-baseline="claudeai"]')).toHaveCount(1)
+})

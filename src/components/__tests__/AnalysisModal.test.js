@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { groupWorstStatus } from '../../utils/statusDisplay'
 
-// #1233 — the modal's group header dot. The original expression was two-valued
+// #1233 — a group's worst status. The original expression was two-valued
 // (`some(s => s.status !== 'operational') ? 'degraded' : 'operational'`), so a service whose status
 // source AIWatch could not read dragged the whole group to "degraded". Narrowing that test to the
 // display-affected predicate fixed the false outage but opened the opposite hole: with no third arm,
