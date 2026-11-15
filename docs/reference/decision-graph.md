@@ -315,10 +315,11 @@ once and were wrong within three hours of the next `memory-ingest`; run the swee
 `.memory-dir` file at the repo root holding the path.
 Neither present, or the path missing, or the directory holding no pages — all exit 2.
 
-The bundle is a git clone, so `memory-ingest` / `memory-lint` writes stay uncommitted until someone
-commits them, and a second machine needs a `pull` first. Neither skill prescribes those commands —
-they are ordinary git operations on a second repo, and three attempts to write a policy for them into
-the skills each contradicted either the workflow gates or the other skill.
+The bundle is a git clone. `scripts/memory-autocommit.mjs` (#2006) commits and pushes it when the
+structural lint passes; it runs from the SessionEnd hook in `.claude/settings.json`, at the end of `memory-ingest`,
+and from a daily `launchd` job. Both the hook and the job append to `~/Library/Logs/memory-autocommit.log`. The job
+and the written exception to the commit-on-command rule (`~/.claude/CLAUDE.md`) live in the operator's user-level
+config, not in this repo.
 
 Three schemes for inferring the path were tried during review and each grew a new hole one round
 later: each added a predicate to a guard inspecting a filesystem this repo does not control.

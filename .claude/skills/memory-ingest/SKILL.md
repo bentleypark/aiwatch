@@ -35,7 +35,7 @@ persistent memory (MemPalace retired, #891). This skill is the **ingest** operat
    Redundant feedback clusters should be merged, not multiplied (see #891 Phase 1).
 3. **Write** the page: `memory/<type>_<kebab-slug>.md` with frontmatter `name` / `description` / `type`
    (+ optional `title`/`tags`). Link related pages with `[[type_slug]]` — the **filename stem** (e.g.
-   `[[feedback_local_verify]]` → `feedback_local_verify.md`), NOT the bare frontmatter `name`. A not-yet-existing `[[link]]` is fine.
+   `[[feedback_local_verify]]` → `feedback_local_verify.md`), NOT the bare frontmatter `name`.
    - **Quote any `description`/`title` containing a bare `#`** (e.g. `#N`) — unquoted YAML treats `#` as a
      comment and truncates the value.
    - The harness normalizes frontmatter on write (relocates `type`/`title`/`tags` under `metadata:`) — expected, don't fight it.
@@ -43,10 +43,12 @@ persistent memory (MemPalace retired, #891). This skill is the **ingest** operat
    content in MEMORY.md — one line per page.
 5. **Log**: append one line to `memory/log.md` — `YYYY-MM-DD ingest: <slug> (<why in a few words>)`.
 6. If a stored fact turned out wrong, delete the page (and its index line) instead of leaving it.
-7. **Audit log**: from the aiwatch repo root run `npm run hook-audit:sync` (#1844), so this machine's
-   `audit/<host>.jsonl` is in the bundle with the pages.
-8. **Report** the files this ingest wrote or deleted, plus `audit/`, as the list to commit — and, from the
-   bundle's `git status --short`, any other uncommitted file, named separately. This skill commits and pushes nothing.
+7. **Commit and push**: from the aiwatch repo root run `node scripts/memory-autocommit.mjs --trigger ingest`
+   (#2006). It syncs this machine's `audit/<host>.jsonl` (#1844), runs the structural lint, and commits and
+   pushes the whole bundle only when the lint passes.
+8. **Report** the files this ingest wrote or deleted, and the script's one-line result. On `lint-failed`, fix
+   the finding and run step 7 again; on `committed-local`, quote its detail: a `pull --rebase` conflict or a hand commit ahead blocks every later
+   push until someone resolves it by hand.
 
 ## Relationship
 Complements `memory-lint` (periodic health check). The **query** side (load index → relevant pages) is native session-start auto-load, optionally nudged by a `SessionStart` hook if wired in `settings.local.json`.
