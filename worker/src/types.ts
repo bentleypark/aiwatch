@@ -595,6 +595,11 @@ export interface ServiceConfig {
   // (daily) sweep skips it, and the #689 source-dead RISING-edge "Inactive" (weekly) is suppressed
   // (marker still written so a RECOVERY is still detected + notified). REMOVE when the page reactivates.
   statusSourceDeactivated?: boolean
+  // #1998 — the source is alive but its uptime is a KNOWN, decided absence (Cursor: #1814). Skips ONLY the
+  // #1389 "uptime has stopped publishing" operator alert; every other alert on the card keeps firing.
+  // ALERT SUPPRESSION ONLY, like `statusSourceDeactivated` (#1268): nothing published to readers may key
+  // off it. REMOVE when the provider publishes the figure again.
+  uptimeKnownAbsent?: boolean
   // #802 — ISO date (YYYY-MM-DD) AIWatch began monitoring this service. Used to derive
   // ServiceStatus.coverageDays (now − addedAt); a service with <30 days of coverage is held out of the
   // Reliability Ranking (thin observed window → inflated Score). ABSENT = an established service (added

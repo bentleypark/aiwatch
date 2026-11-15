@@ -430,11 +430,8 @@ describe('the sweep is wired into the cron', () => {
 
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('fires the real alert through scheduled(), for an armed service on the real roster', async () => {
-    const store: Record<string, string> = {
-      // `claude` lost its uptime 7h ago and nothing else is carrying it.
-      'tracking:state': JSON.stringify({ claude: { uptimeSeenAt: '2026-08-11', uptimeMissingSince: '2026-08-12T05:07:00.000Z' } }),
-    }
+  async function runCron(tracking: Record<string, unknown>) {
+    const store: Record<string, string> = { 'tracking:state': JSON.stringify(tracking) }
     const kv = {
       get: async (k: string) => store[k] ?? null,
       getWithMetadata: async () => ({ value: null, metadata: null }),
@@ -455,11 +452,32 @@ describe('the sweep is wired into the cron', () => {
     vi.mocked(fetchAllServices).mockResolvedValue({ raw: OPERATIONAL, enriched: OPERATIONAL, pageComponents: {}, upstreamFeeds: [], fetchStats: { maxInFlight: 0, answered: 0, timeouts: 0, httpErrors: 0, otherErrors: 0, waitingAtStartAnswered: 0, waitingAtStartTimeouts: 0 } })
 
     await workerModule.scheduled(event, { STATUS_CACHE: kv, DISCORD_WEBHOOK_URL: 'https://discord.test/hook' } as never, ctx)
+    return { posted: posted.join('\n'), store }
+  }
+
+  it('fires the real alert through scheduled(), for an armed service on the real roster', async () => {
+    // `claude` lost its uptime 7h ago and nothing else is carrying it.
+    const { posted, store } = await runCron({ claude: { uptimeSeenAt: '2026-08-11', uptimeMissingSince: '2026-08-12T05:07:00.000Z' } })
 
     // The embed this feature exists to deliver, reaching Discord from the real handler — and the
     // dedup marker written for it, which is what a roster that never reaches the sweep would lack.
-    expect(posted.join('\n'), 'the uptime-missing embed').toContain('uptime has stopped publishing')
-    expect(posted.join('\n')).toContain('Claude API')
+    expect(posted, 'the uptime-missing embed').toContain('uptime has stopped publishing')
+    expect(posted).toContain('Claude API')
     expect(store['alerted:uptime-missing:claude']).toBe('1')
+  }, TEST_TIMEOUT_MS)
+
+  it('skips Cursor — its missing uptime is decided (#1814) — while its unreadable-source alert still fires (#1998)', async () => {
+    const lostUptime = { uptimeSeenAt: '2026-08-11', uptimeMissingSince: '2026-08-12T05:07:00.000Z' }
+    const { posted, store } = await runCron({
+      claude: lostUptime,
+      // The cron reads `Date.now()`, not the event's time, so the live streak is dated off the real clock.
+      cursor: { ...lostUptime, failSince: new Date(Date.now() - 2 * 3_600_000).toISOString(), failCountAt: new Date(Date.now() - 60_000).toISOString(), failCount: 20 },
+    })
+
+    expect(posted, 'the control service still alerts, so the sweep ran').toContain('Claude API')
+    expect(posted).not.toContain('Cursor — uptime has stopped publishing')
+    expect(store['alerted:uptime-missing:cursor']).toBeUndefined()
+    expect(posted, 'the #500 alert for the same card is not suppressed').toContain('Cursor — status source unreadable 1h+')
+    expect(store['alerted:fetch-persistent:cursor']).toBe('1')
   }, TEST_TIMEOUT_MS)
 })

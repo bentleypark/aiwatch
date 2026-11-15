@@ -59,9 +59,7 @@ export async function checkUptimeLiveness(
   services: Array<{ id: string; name: string; statusUrl: string }>,
   nowMs: number,
   send: DiscordSend,
-  // Services whose status source is a KNOWN, acknowledged dead end (`statusSourceDeactivated`, #800).
-  // The operator already has an open item for those; a second alert saying the uptime is also gone adds
-  // nothing. Same suppression set the persistent-failure sweep takes.
+  // Services whose missing uptime the operator has already acknowledged (#800, #1998).
   suppressedIds: Set<string> = new Set(),
 ): Promise<void> {
   if (!kv || !discordUrl) return

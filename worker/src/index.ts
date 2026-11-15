@@ -2105,14 +2105,16 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
   // answers 200 but has stopped publishing an uptime NUMBER. Reads the same tracking blob (the
   // `uptimeSeenAt`/`uptimeMissingSince` pair `trackUptimeReading` writes on every fetch) and warns once
   // per service per 7 days. Same `deactivatedSourceIds` suppression — an acknowledged dead page does not
-  // need a second alert saying its uptime is gone too.
+  // need a second alert saying its uptime is gone too. #1998 — plus `uptimeKnownAbsent`, which skips this
+  // sweep only (a live source keeps its #500/#689 alerts).
+  const uptimeKnownAbsentIds = SERVICES.filter(c => c.uptimeKnownAbsent).map(c => c.id)
   await checkUptimeLiveness(
     env.STATUS_CACHE,
     env.DISCORD_WEBHOOK_URL,
     SERVICES.map((c) => ({ id: c.id, name: c.name, statusUrl: c.statusUrl })),
     Date.now(),
     sendDiscordAlert,
-    deactivatedSourceIds,
+    new Set([...deactivatedSourceIds, ...uptimeKnownAbsentIds]),
   )
 
   // #1797 — hourly: past-month archive rows still open, resolved upstream.
