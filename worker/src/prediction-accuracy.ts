@@ -81,8 +81,7 @@ export function predictedHoursFrom(analysis: PredictionAnalysis | null | undefin
  * the model got wrong. Falls back to the current estimate when no first estimate was recorded
  * (analyses written before #1003 shipped).
  *
- * Live surfaces (`estimateExceeded`, `exceededRecoveryText`) intentionally do NOT use this — a user
- * looking at an ongoing incident needs the current ETA, not the superseded original.
+ * Live surfaces (`estimateExceeded`, `exceededRecoveryText`) use `liveBoundHours` instead.
  */
 export function baselineHoursFrom(analysis: PredictionAnalysis | null | undefined): number | null {
   if (!analysis) return null
@@ -133,16 +132,25 @@ export function withinEstimateText(outcome: PredictionOutcome | null, lang: Lang
   return lang === 'ko' ? `예측 ~${p} 이내` : `within ~${p} est.`
 }
 
+/** #1993 — the bound an ACTIVE incident is held to: the current estimate, else the first one when the
+ *  current analysis gave none ("N/A"). */
+export function liveBoundHours(analysis: PredictionAnalysis | null | undefined): number | null {
+  const current = predictedHoursFrom(analysis)
+  if (current != null) return current
+  const first = analysis?.firstEstimatedRecoveryHours
+  return typeof first === 'number' && first > 0 ? first : null
+}
+
 /**
  * True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
  * short "Est. Recovery" range is no longer credible (a 2–4h estimate on an incident ongoing for days).
- * Mirrors the worker's `recoveryExceeded` gate (incidentAge > estHours). Callers should then render the
+ * Callers should then render the
  * "Exceeded typical pattern" wording instead of the outdated range. Returns false once resolved (the
  * predicted-vs-actual outcome takes over), when there's no usable prediction, or without a startedAt.
  */
 export function estimateExceeded(analysis: PredictionAnalysis | null | undefined, incident: PredictionIncident | null | undefined, nowMs = Date.now()): boolean {
   if (!analysis || analysis.resolvedAt) return false
-  const predictedHours = predictedHoursFrom(analysis)
+  const predictedHours = liveBoundHours(analysis)
   if (predictedHours == null) return false
   const startedAt = incident?.startedAt
   if (!startedAt) return false
@@ -176,7 +184,7 @@ export function exceededRecoveryText(analysis: PredictionAnalysis | null | undef
   const startedAt = incident?.startedAt
   const elapsedMin = startedAt ? (nowMs - new Date(startedAt).getTime()) / 60000 : NaN
   const raw = analysis?.estimatedRecovery
-  const bound = predictedHoursFrom(analysis)
+  const bound = liveBoundHours(analysis)
   const range = (raw && raw !== 'N/A' && raw !== 'No historical data for estimation')
     ? raw
     : (bound != null ? predictedHoursText(bound) : null)
@@ -243,13 +251,11 @@ export function recoveryLine(analysis: PredictionAnalysis, incident: PredictionI
   }
   if (analysis.resolvedAt) return lastedLine(analysis, incident, lang)
   const est = analysis.estimatedRecovery
-  const value = est === 'No historical data for estimation'
-    ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
-    : estimateExceeded(analysis, incident, nowMs)
-      ? exceededRecoveryText(analysis, incident, lang, nowMs)
-      : est === 'N/A'
-        ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
-        : (est ?? '')
+  const value = estimateExceeded(analysis, incident, nowMs)
+    ? exceededRecoveryText(analysis, incident, lang, nowMs)
+    : est === 'No historical data for estimation' || est === 'N/A'
+      ? (lang === 'ko' ? '복구 신호 모니터링 중' : 'Monitoring recovery signals')
+      : (est ?? '')
   return { icon: '⏱', label: lang === 'ko' ? '예상 복구' : 'Est. Recovery', value }
 }
 

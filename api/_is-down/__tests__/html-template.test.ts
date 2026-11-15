@@ -2115,10 +2115,26 @@ describe('#1993 — meta description and share text on a resolved insight', () =
   it.each([
     ['meta', () => buildMetaDescription(mkSeo(), svc, liveNa)],
     ['share', () => share(liveNa)],
-  ])('%s: live keeps its estimate', (_, render) => {
+  ])('%s: live with no estimate is monitoring, not exceeded', (_, render) => {
     const out = render()
-    expect(out).toContain('Est. recovery: Exceeded typical pattern.')
+    expect(out).toContain('Est. recovery: Monitoring recovery signals.')
+    expect(out).not.toContain('signals..')
     expect(out).not.toContain('Lasted')
+  })
+
+  it.each([
+    ['meta', () => buildMetaDescription(mkSeo(), svc, { ...liveNa, firstEstimatedRecoveryHours: 3 })],
+    ['share', () => share({ ...liveNa, firstEstimatedRecoveryHours: 3 } as typeof liveNa)],
+  ])('%s: live N/A past its first estimate is exceeded', (_, render) => {
+    expect(render()).toContain('Est. recovery: Exceeded typical pattern.')
+  })
+
+  it.each([
+    ['meta', () => buildMetaDescription(mkSeo(), svc, { ...liveNa, firstEstimatedRecoveryHours: 5 })],
+    ['share', () => share({ ...liveNa, firstEstimatedRecoveryHours: 5 } as typeof liveNa)],
+  ])('%s: live N/A within its first estimate is monitoring', (_, render) => {
+    expect(render()).toContain('Est. recovery: Monitoring recovery signals.')
+    expect(render()).not.toContain('signals..')
   })
 
   it('meta: resolved with no start says neither', () => {

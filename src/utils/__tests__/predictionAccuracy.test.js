@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { predictedHoursFrom, baselineHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, recoveryLine, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
+import { predictedHoursFrom, baselineHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, recoveryLine, estimateExceeded, liveBoundHours, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
 
 describe('#1003 — the modal scores against the FIRST estimate, live text against the current one', () => {
   // Pinecone: first estimate 1–4h, re-analysis inflated it to ~15h at the 4h mark, actual 4h 55m.
@@ -253,5 +253,32 @@ describe('#1993 recoveryLine — a resolved analysis with no numeric estimate', 
 
   it('a numeric estimate still scores predicted vs actual', () => {
     expect(recoveryLine({ ...na, estimatedRecovery: '1–2h', estimatedRecoveryHours: 2 }, inc, 'en').label).toBe('Predicted vs actual')
+  })
+})
+
+describe('#1993 recoveryLine — a live analysis with no current estimate ("N/A")', () => {
+  const now = Date.UTC(2026, 10, 15, 12, 0)
+  const inc = (minAgo) => ({ startedAt: new Date(now - minAgo * 60_000).toISOString() })
+  const value = (analysis, minAgo, lang = 'en') => recoveryLine(analysis, inc(minAgo), lang, now).value
+
+  it.each([
+    ['no first estimate, 5 min in', { estimatedRecovery: 'N/A' }, 5, 'Monitoring recovery signals'],
+    ['no first estimate, 2h in', { estimatedRecovery: 'N/A' }, 120, 'Monitoring recovery signals'],
+    ['first 3h, 1h in', { estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 3 }, 60, 'Monitoring recovery signals'],
+    ['first 3h, 6h in', { estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 3 }, 360, 'Ongoing ~6h · exceeded ~3h est.'],
+    ['first 1h, 6h in', { estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 1 }, 360, 'Ongoing ~6h · far exceeded est.'],
+  ])('%s', (_, analysis, minAgo, want) => {
+    expect(value(analysis, minAgo)).toBe(want)
+  })
+
+  it('reads the same in Korean', () => {
+    expect(value({ estimatedRecovery: 'N/A' }, 5, 'ko')).toBe('복구 신호 모니터링 중')
+    expect(value({ estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 3 }, 360, 'ko')).toBe('약 6시간째 진행 · 예측(3h) 초과')
+  })
+
+  it('a current estimate still wins over the first one', () => {
+    expect(liveBoundHours({ estimatedRecovery: '4–8h', estimatedRecoveryHours: 8, firstEstimatedRecoveryHours: 3 })).toBe(8)
+    expect(liveBoundHours({ estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 3 })).toBe(3)
+    expect(liveBoundHours({ estimatedRecovery: 'N/A' })).toBeNull()
   })
 })

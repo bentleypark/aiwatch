@@ -2235,12 +2235,12 @@ describe('parseRecoveryHours', () => {
 })
 
 describe('formatRecoveryDisplay', () => {
-  it('replaces N/A with user-friendly text', () => {
-    expect(formatRecoveryDisplay('N/A')).toBe('Exceeded typical pattern')
+  it('#1993 — N/A is no estimate, not an exceeded one', () => {
+    expect(formatRecoveryDisplay('N/A')).toBe('Monitoring recovery signals')
   })
 
   it('replaces no-historical-data text', () => {
-    expect(formatRecoveryDisplay('No historical data for estimation')).toBe('Monitoring recovery signals...')
+    expect(formatRecoveryDisplay('No historical data for estimation')).toBe('Monitoring recovery signals')
   })
 
   it('passes through normal recovery times', () => {
@@ -2605,7 +2605,7 @@ describe('formatAnalysisEmbedSection (#882)', () => {
 
   it('maps N/A recovery to the friendly phrase (shared formatRecoveryDisplay)', () => {
     const out = formatAnalysisEmbedSection({ ...base, estimatedRecovery: 'N/A' }, DIV, undefined)
-    expect(out).toContain('⏱ Est. recovery: Exceeded typical pattern')
+    expect(out).toContain('⏱ Est. recovery: Monitoring recovery signals')
   })
 
   it('is byte-identical to the legacy inline template (KV path == inline-success path)', () => {

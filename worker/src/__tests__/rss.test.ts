@@ -786,7 +786,7 @@ describe('buildRssFeed — AI analysis block (#724)', () => {
   it('maps an N/A recovery via formatRecoveryDisplay (parity with Discord)', () => {
     const map: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'x', estimatedRecovery: 'N/A', affectedScope: [] }] }
     const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, map)
-    expect(xml).toContain('Est. recovery: Exceeded typical pattern')
+    expect(xml).toContain('Est. recovery: Monitoring recovery signals')
   })
 
   it('#1697 — renders the service\'s past recovery times under the estimate, and nothing without them', () => {
