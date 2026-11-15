@@ -87,8 +87,7 @@ export type AccuracyVerdict = 'accurate' | 'over-predicted' | 'under-predicted' 
  * and shipped as "faster than ~15h est." — a win, when it was really a near-miss over the 4h bound.
  *
  * Every surface that compares predicted-vs-actual (Discord recovery embed, Slack /feed, the durable
- * history corpus and the accuracy aggregate + RAG grounding built from it) reads this. Live surfaces
- * — the ongoing-incident ETA, `recoveryExceeded` — must keep using `estimatedRecoveryHours`.
+ * history corpus and the accuracy aggregate + RAG grounding built from it) reads this.
  *
  * Falls back to the current estimate when no first estimate was recorded (analyses written before
  * this shipped), so an in-flight incident at deploy time still gets a comparison line.

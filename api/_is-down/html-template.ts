@@ -26,8 +26,7 @@ import type { SharedUpstreamNote } from './shared-upstream-note'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
-  if (recovery === 'No historical data for estimation') return 'Monitoring recovery signals...'
-  if (recovery === 'N/A') return 'Exceeded typical pattern'
+  if (recovery === 'No historical data for estimation' || recovery === 'N/A') return 'Monitoring recovery signals'
   return recovery
 }
 
@@ -51,6 +50,15 @@ function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimate
   return hours > 0 ? hours : null
 }
 
+/** #1993 — the bound an ACTIVE incident is held to: the current estimate, else the first one when the
+ *  current analysis gave none ("N/A"). Mirrors `liveBoundHours` (worker/src/prediction-accuracy.ts). */
+function liveBoundEn(insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }): number | null {
+  const current = recoveryUpperBoundHours(insight)
+  if (current != null) return current
+  const first = insight.firstEstimatedRecoveryHours
+  return typeof first === 'number' && first > 0 ? first : null
+}
+
 /** #1003 — the bound a RESOLVED incident is SCORED against: the first, hindsight-free estimate.
  *  Mirrors the worker `scoringBaselineHours` (incident-history.ts) exactly — NUMERIC fields only, no
  *  display-string parse, so this SEO card and the Discord/`/feed`/corpus verdicts can never disagree
@@ -58,9 +66,8 @@ function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimate
  *
  *  `estimatedRecoveryHours` is the CURRENT estimate, which the worker's re-analysis ratchets upward
  *  once an incident outruns its own prediction — scoring against it turns the model's misses into wins.
- *  Falls back to it only for analyses written before #1003. The LIVE helpers below deliberately keep
- *  using `recoveryUpperBoundHours` (current estimate + string parse): an ongoing incident needs the
- *  current ETA, not the superseded original. */
+ *  Falls back to it only for analyses written before #1003. The LIVE helpers below use `liveBoundEn`
+ *  instead. */
 function scoringBaselineEn(insight: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }): number | null {
   const first = insight.firstEstimatedRecoveryHours
   if (typeof first === 'number' && first > 0) return first
@@ -70,19 +77,19 @@ function scoringBaselineEn(insight: { estimatedRecoveryHours?: number; firstEsti
 
 /** True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
  *  short range is no longer credible (a 2–4h estimate on an incident ongoing for days). Mirrors the
- *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt`, a usable
+ *  frontend `estimateExceeded`. Gated on `resolvedAt`, a usable
  *  bound, and a startedAt. */
 function recoveryEstimateExceeded(
-  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null | undefined,
+  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null | undefined,
 ): boolean {
   if (!insight || insight.resolvedAt) return false
-  const bound = recoveryUpperBoundHours(insight)
+  const bound = liveBoundEn(insight)
   if (bound == null || !insight.startedAt) return false
   const elapsed = Date.now() - new Date(insight.startedAt).getTime()
   return Number.isFinite(elapsed) && elapsed > 0 && elapsed > bound * 3_600_000
 }
 
-function recoveryClauseEn(insight: { estimatedRecovery: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string }): string {
+function recoveryClauseEn(insight: { estimatedRecovery: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string }): string {
   if (insight.resolvedAt) {
     const lasted = lastedLine(insight, insight, 'en')
     return lasted ? ` Lasted ${lasted.value}.` : ''
@@ -107,13 +114,13 @@ export const FAR_EXCEEDED_FACTOR = 3
  *  falls back to the terse "Exceeded typical pattern" when elapsed/range are unavailable. Caller
  *  gates on `recoveryEstimateExceeded`. Meta/share keep the terse wording. */
 export function exceededRecoveryTextEn(
-  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string },
+  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string },
   nowMs: number = Date.now(),
 ): string {
   const started = insight.startedAt ? new Date(insight.startedAt).getTime() : NaN
   const elapsedMin = Number.isFinite(started) ? (nowMs - started) / 60000 : NaN
   const raw = insight.estimatedRecovery
-  const bound = recoveryUpperBoundHours(insight)
+  const bound = liveBoundEn(insight)
   const range = raw && raw !== 'N/A' && raw !== 'No historical data for estimation'
     ? raw
     : (bound != null ? fmtMinEn(Math.round(bound * 60)) : null) // parity with JS predictedHoursText (fmtMin)

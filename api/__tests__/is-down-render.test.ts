@@ -212,6 +212,15 @@ describe('buildMetaDescription — recovery estimate exceeded (Mistral 2–4h on
     expect(desc).not.toContain('Exceeded typical pattern')
   })
 
+  it('#1993 — a current estimate still wins over the first one', () => {
+    const desc = buildMetaDescription(seo, degraded, {
+      summary: 'Ongoing degradation.', estimatedRecovery: '8–15h', estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4,
+      startedAt: new Date(Date.now() - 295 * 60_000).toISOString(),
+    })
+    expect(desc).toContain('8–15h')
+    expect(desc).not.toContain('Exceeded typical pattern')
+  })
+
   it('meta/share keep the terse "Exceeded typical pattern" wording (not the elapsed detail)', () => {
     const desc = buildMetaDescription(seo, degraded, {
       summary: 'Ongoing degradation.', estimatedRecovery: '2–4h', estimatedRecoveryHours: 4,
@@ -233,6 +242,11 @@ describe('exceededRecoveryTextEn (is-down AI card — elapsed vs estimate)', () 
     expect(exceededRecoveryTextEn(
       { estimatedRecovery: 'N/A', estimatedRecoveryHours: 4, startedAt: '2026-07-01T15:38:30.837Z' }, now,
     )).toBe('Ongoing ~12h · exceeded ~4h est.')
+  })
+  it('#1993 — a live N/A is held to its first estimate', () => {
+    const startedAt = '2026-07-01T21:24:57.000Z' // 6h before now
+    expect(exceededRecoveryTextEn({ estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 3, startedAt }, now)).toBe('Ongoing ~6h · exceeded ~3h est.')
+    expect(exceededRecoveryTextEn({ estimatedRecovery: 'N/A', firstEstimatedRecoveryHours: 1, startedAt }, now)).toBe('Ongoing ~6h · far exceeded est.')
   })
   it('falls back to terse wording when startedAt is missing', () => {
     expect(exceededRecoveryTextEn({ estimatedRecovery: '2–4h' }, now)).toBe('Exceeded typical pattern')

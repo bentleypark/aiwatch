@@ -166,8 +166,7 @@ export interface AIAnalysisResult {
   // hindsight-free: a re-analysis is made hours into the incident, under the floor stated in
   // `ANALYSIS_SYSTEM_PROMPT`. Grading recovery against that
   // value turned every miss into a win ("4h 55m — faster than ~15h est." on an incident first
-  // estimated at 1–4h). Live surfaces show `estimatedRecoveryHours` (a user needs the CURRENT
-  // ETA); anything that SCORES the prediction reads this instead (`scoringBaselineHours`).
+  // estimated at 1–4h). Anything that SCORES the prediction reads this (`scoringBaselineHours`).
   firstEstimatedRecoveryHours?: number
   affectedScope: string[]
   needsFallback: boolean  // AI-assessed: true if incident warrants switching to alternative service
@@ -207,11 +206,10 @@ export function parseRecoveryHours(recovery: string): number | null {
 
 /**
  * Format recovery display text — replaces raw AI output with user-friendly text.
- * "N/A" → "Exceeded typical pattern", "No historical data..." → "Monitoring recovery signals..."
+ * "N/A" and "No historical data..." → "Monitoring recovery signals"
  */
 export function formatRecoveryDisplay(recovery: string): string {
-  if (recovery === 'No historical data for estimation') return 'Monitoring recovery signals...'
-  if (recovery === 'N/A') return 'Exceeded typical pattern'
+  if (recovery === 'No historical data for estimation' || recovery === 'N/A') return 'Monitoring recovery signals'
   return recovery
 }
 
