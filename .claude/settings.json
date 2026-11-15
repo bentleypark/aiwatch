@@ -94,6 +94,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ date; node \"$CLAUDE_PROJECT_DIR/scripts/memory-autocommit.mjs\" --trigger session-end; } >> \"$HOME/Library/Logs/memory-autocommit.log\" 2>&1",
+            "timeout": 45
+          }
+        ]
+      }
     ]
   }
 }
