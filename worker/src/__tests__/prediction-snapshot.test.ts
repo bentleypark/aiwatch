@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  buildPredictionSnapshot, appendPredictionSnapshot, readPredictionSnapshots, appendLedger, summarizeSnapshotCoverage,
+  buildPredictionSnapshot, estimateSourceOf, appendPredictionSnapshot, readPredictionSnapshots, appendLedger, summarizeSnapshotCoverage,
   snapshotKey, ledgerKey, SNAPSHOT_CAP, SNAPSHOT_TTL_S, FIRST_UPDATE_MAX, LEDGER_MAX_ENTRIES,
   type PredictionSnapshot,
 } from '../prediction-snapshot'
+import { parseAnalysisResponse } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import type { KVLike } from '../utils'
 
@@ -41,6 +42,7 @@ describe('buildPredictionSnapshot', () => {
       scope: ['API'],
       model: 'gemma',
       estimateHours: 2,
+      estimateSource: 'numeric',
       historyMatches: 2,
       firstUpdate: 'We are investigating elevated errors.',
     })
@@ -84,6 +86,30 @@ describe('buildPredictionSnapshot', () => {
 
   it('records 0 history matches when the prompt used the fallback list', () => {
     expect(buildPredictionSnapshot(INC, RESULT, { ...CTX, historyMatches: 0 }).historyMatches).toBe(0)
+  })
+
+  it.each([
+    [2, 'model', 'numeric'],
+    [2, 'parser', 'numeric'],
+    [2, undefined, 'numeric'],
+    [null, 'model', 'model-na'],
+    [null, 'parser', 'missing'],
+    [null, undefined, undefined],
+  ] as const)('estimateSourceOf(%s, %s) is %s', (hours, by, expected) => {
+    expect(estimateSourceOf(hours, by)).toBe(expected)
+  })
+
+  it('stores the source of the estimate parsed from the model reply', () => {
+    const reply = (fields: Record<string, unknown>) =>
+      parseAnalysisResponse(JSON.stringify({ summary: 'Degraded.', affectedScope: [], needsFallback: false, ...fields }), 'inc-1', 'gemma', '')!
+    expect(buildPredictionSnapshot(INC, reply({ estimatedRecovery: '1–2h' }), CTX)).toMatchObject({ estimateHours: 2, estimateSource: 'numeric' })
+    expect(buildPredictionSnapshot(INC, reply({ estimatedRecovery: 'N/A' }), CTX)).toMatchObject({ estimateHours: null, estimateSource: 'model-na' })
+    expect(buildPredictionSnapshot(INC, reply({ estimatedRecovery: 'No historical data for estimation' }), CTX)).toMatchObject({ estimateHours: null, estimateSource: 'model-na' })
+    expect(buildPredictionSnapshot(INC, reply({}), CTX)).toMatchObject({ estimateHours: null, estimateSource: 'missing' })
+  })
+
+  it('omits the source when the analysis does not say who wrote the estimate', () => {
+    expect(buildPredictionSnapshot(INC, { ...RESULT, estimatedRecoveryHours: undefined }, CTX)).not.toHaveProperty('estimateSource')
   })
 })
 

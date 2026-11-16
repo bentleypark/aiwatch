@@ -2302,6 +2302,20 @@ describe('parseAnalysisResponse', () => {
     expect(parseAnalysisResponse('{ summary: bad json }', incId, 'gemma', timelineAt)).toBeNull()
   })
 
+  it('records whether the model wrote the estimate or the parser filled it, before normalisation rewrites the text', () => {
+    const parse = (fields: Record<string, unknown>) =>
+      parseAnalysisResponse(JSON.stringify({ summary: 'Degraded.', affectedScope: [], needsFallback: false, ...fields }), incId, 'gemma', timelineAt)!
+    expect(parse({ estimatedRecovery: '1–2h' }).estimateWrittenBy).toBe('model')
+    expect(parse({ estimatedRecovery: 'N/A' }).estimateWrittenBy).toBe('model')
+    const prose = parse({ estimatedRecovery: 'No historical data for estimation' })
+    expect(prose.estimatedRecovery).not.toBe('No historical data for estimation')
+    expect(prose.estimateWrittenBy).toBe('model')
+    const missing = parse({})
+    expect(missing.estimatedRecovery).toBe('N/A')
+    expect(missing.estimateWrittenBy).toBe('parser')
+    expect(parse({ estimatedRecovery: null }).estimateWrittenBy).toBe('parser')
+  })
+
   it('handles needsFallback as string "true"', () => {
     const text = JSON.stringify({ summary: 'Outage.', estimatedRecovery: 'N/A', affectedScope: [], needsFallback: 'true' })
     expect(parseAnalysisResponse(text, incId, 'gemma', timelineAt)!.needsFallback).toBe(true)
