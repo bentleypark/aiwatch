@@ -161,6 +161,8 @@ export interface AIAnalysisResult {
   progress?: string
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
+  // #2005 — 'parser' when the model's estimatedRecovery was absent or null and the parser filled 'N/A'.
+  estimateWrittenBy?: 'model' | 'parser'
   // #1003 — the FIRST estimate ever made for this incident, stamped on every write by `putAnalysis`
   // (which pins it in the durable `ai:first-est:` key). `estimatedRecoveryHours` is not
   // hindsight-free: a re-analysis is made hours into the incident, under the floor stated in
@@ -604,6 +606,7 @@ export function parseAnalysisResponse(
     ...(typeof parsed.progress === 'string' && parsed.progress.trim() && { progress: sanitize(parsed.progress) }),
     estimatedRecovery: recovery,
     ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
+    estimateWrittenBy: parsed.estimatedRecovery == null ? 'parser' : 'model',
     affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
     needsFallback: parsed.needsFallback === true || (parsed.needsFallback as unknown) === 'true',
     analyzedAt: new Date().toISOString(),

@@ -59,6 +59,16 @@ describe('analyzeIncidentDetailed — snapshot', () => {
     expect(attempt.snapshot).toMatchObject({ model: 'sonnet', historyMatches: 1, stage: 'investigating' })
   })
 
+  it('tells a model-written N/A from an estimate the model left out', async () => {
+    const reply = (fields: Record<string, unknown>) => ({ run: vi.fn().mockResolvedValue({ response: JSON.stringify({ summary: 's', affectedScope: [], needsFallback: false, ...fields }) }) })
+    const na = await analyzeIncidentDetailed('key', 'Claude API', INC, [], undefined, reply({ estimatedRecovery: 'N/A' }) as unknown as Ai, [])
+    const left = await analyzeIncidentDetailed('key', 'Claude API', INC, [], undefined, reply({}) as unknown as Ai, [])
+    expect(na.result!.estimatedRecovery).toBe('N/A')
+    expect(left.result!.estimatedRecovery).toBe('N/A')
+    expect(na.snapshot).toMatchObject({ estimateHours: null, estimateSource: 'model-na' })
+    expect(left.snapshot).toMatchObject({ estimateHours: null, estimateSource: 'missing' })
+  })
+
   it('records 0 matches when the corpus had nothing similar, and no snapshot when no estimate was made', async () => {
     const none = await analyzeIncidentDetailed('key', 'Claude API', INC, [], undefined, gemma() as unknown as Ai, [])
     expect(none.snapshot!.historyMatches).toBe(0)

@@ -36,6 +36,9 @@ export interface PredictionSnapshot {
   model?: 'gemma' | 'sonnet'
   /** The estimate this analysis made (upper bound, hours); null when the model gave none. */
   estimateHours: number | null
+  /** #2005 — where `estimateHours` came from: a number, a model-written non-number ('N/A' or prose), or a
+   *  field the model left out or set to null. Absent on snapshots written before it, and when the analysis did not say. */
+  estimateSource?: 'numeric' | 'model-na' | 'missing'
   /** How many similar past incidents the prompt carried from the durable corpus (0 = fallback list). */
   historyMatches: number
   /** First provider update, sanitized; kept on one snapshot per incident only. */
@@ -53,7 +56,15 @@ export interface SnapshotResult {
   analyzedAt?: string
   model?: string
   estimatedRecoveryHours?: number
+  estimateWrittenBy?: 'model' | 'parser'
   affectedScope?: string[]
+}
+
+export function estimateSourceOf(estimateHours: number | null, writtenBy: SnapshotResult['estimateWrittenBy']): PredictionSnapshot['estimateSource'] {
+  if (estimateHours != null) return 'numeric'
+  if (writtenBy === 'parser') return 'missing'
+  if (writtenBy === 'model') return 'model-na'
+  return undefined
 }
 
 export function snapshotKey(svcId: string, incId: string): string {
@@ -82,6 +93,8 @@ export function buildPredictionSnapshot(
   const firstText = timeline.map(t => oneLine(sanitize(t.text ?? '', FIRST_UPDATE_MAX))).find(t => t.length > 0)
   const scope = (result.affectedScope ?? []).slice(0, 8).map(s => sanitize(s, 60)).filter(s => s.length > 0)
   const hours = result.estimatedRecoveryHours
+  const estimateHours = typeof hours === 'number' && hours > 0 ? hours : null
+  const estimateSource = estimateSourceOf(estimateHours, result.estimateWrittenBy)
   return {
     at: result.analyzedAt ?? new Date(ctx.now).toISOString(),
     elapsedMin: minutesBetween(ctx.now, new Date(inc.startedAt).getTime()),
@@ -91,7 +104,8 @@ export function buildPredictionSnapshot(
     impact: inc.impact === 'minor' || inc.impact === 'major' || inc.impact === 'critical' ? inc.impact : null,
     ...(scope.length > 0 && { scope }),
     ...(result.model === 'gemma' || result.model === 'sonnet' ? { model: result.model } : {}),
-    estimateHours: typeof hours === 'number' && hours > 0 ? hours : null,
+    estimateHours,
+    ...(estimateSource && { estimateSource }),
     historyMatches: Math.max(0, Math.floor(ctx.historyMatches)),
     ...(firstText && { firstUpdate: firstText }),
   }
