@@ -155,7 +155,7 @@ Then run the Monthly Reports command from the table above.
     human check whose evidence will outlive the date. If neither is possible, do not add a date;
     write a concrete reopen condition instead.
 
-    At merge, add the `verify-blocked` label while the production check is pending. The daily job
+    At merge, add the `verify-blocked` label when `node scripts/check-verify-blocked.mjs N` exits 0 (#2011). The daily job
     adds `body-drift` when shipped checklist boxes remain unchecked, and removes it after the issue
     body is synchronized. See the [assertion and label lifecycle](verify-assertions.md#label-lifecycle)
     for the complete lifecycle; without `verify-blocked`, the body-drift guard does not scan the issue.

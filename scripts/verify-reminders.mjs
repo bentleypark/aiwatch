@@ -56,6 +56,14 @@ export function findBodyDrift(body) {
   return { count: items.length, samples: items.slice(0, 5) }
 }
 
+/** #2011 — whether `verify-blocked` may be applied: an open `verify-after` line, and no box `findBodyDrift` would flag. */
+export function verifyBlockedEligibility(body) {
+  if (parseVerifyAfter(body).length === 0) return { eligible: false, reason: 'no unchecked verify-after line', openBoxes: [] }
+  const drift = findBodyDrift(body)
+  if (drift.count > 0) return { eligible: false, reason: `${drift.count} open box(es) other than verify-after`, openBoxes: drift.samples }
+  return { eligible: true, reason: 'only verify-after lines are open', openBoxes: [] }
+}
+
 /**
  * True when an issue is a body-drift candidate: labeled `verify-blocked` (code shipped, verify-gated)
  * AND NOT `tracking`. A `tracking` umbrella legitimately keeps many open sub-item checkboxes (future
