@@ -100,8 +100,9 @@ to the now-retired `deferred` label); `tracking` stays for meta umbrellas.
 - **P0** — any `U0-now`. Drop everything.
 - **P1** — high impact + `U1-soon` + small/medium effort. The "do next" set.
 - **P1\*** — **work already shipped; only a dated production-verify remains.** NOT a do-next coding
-  item — see the verify-before-recommend gate below. Keep it off the recommended-pick list. Every
-  `P1*` issue carries the persistent `verify-blocked` label so the next sweep skips it by label alone.
+  item — see the verify-before-recommend gate below. Keep it off the recommended-pick list. A `P1*`
+  issue carries the persistent `verify-blocked` label when item 4's check allows it, so the next sweep
+  skips it by label alone.
 - **P2** — high impact + large effort (needs a scoping/design pass first), OR high impact + `U2-later`,
   OR medium impact + `U2-later`.
 - **P3** — low impact / `U3-someday`.
@@ -199,11 +200,13 @@ Before recommending ANY issue as do-next, verify it the **same way** you'd verif
    `verify-blocked` is persisted below — a worktree is transient, so the label would go stale and then
    suppress a genuinely available issue. (`ship-issue` runs `git worktree list` too, to decide *where to
    branch*; here it decides *what not to recommend*. Same command, different question — not a duplicate.)
-3. **Auto-demote to `P1*` (exclude from do-next)** if EITHER: a linked PR is merged, OR the body has a
-   `verify-after` line / a `## Remaining (post-deploy)` (or equiv.) section. Such issues are
-   **signal-gated**, not actionable — their remaining item is a dated GA4/prod-data check, not code.
-4. **Label the gate so the next sweep sees it without re-deriving**: add `verify-blocked` to a
-   verify-gated issue (create the label once if missing). A `verify-blocked`/`verify-overdue` issue is
+3. **Exclude from do-next** if EITHER: a linked PR is merged, OR the body has a `verify-after` line / a
+   `## Remaining (post-deploy)` (or equiv.) section. Such issues are **signal-gated**, not actionable.
+   This holds even when other boxes are still open (a later phase, a design decision). Re-derive it
+   every sweep; it needs no label.
+4. **Label the gate so the next sweep sees it without re-deriving**: add `verify-blocked` only when
+   `node scripts/check-verify-blocked.mjs N [--repo OWNER/REPO]` exits 0 (#2011). On exit 1 leave it
+   off; item 3 still excludes the issue. A `verify-blocked`/`verify-overdue` issue is
    skipped from do-next by **label alone** next time — closing the gap that lets it leak back in.
    **If the remaining check is machine-checkable** (a predicate over an AIWatch JSON endpoint), also add
    a Tier-A `assert:` line under its `verify-after` (#873, [docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md))

@@ -203,7 +203,7 @@ covers both without reopening the false-suppression risk the open-side anchor ex
 
 | Label | Added by | Removed by |
 |---|---|---|
-| `verify-blocked` | operator at merge (ship-issue step 10) | auto-verify, once no unchecked `verify-after` line remains; **or the closed-issue sweep (#1037)** |
+| `verify-blocked` | operator at merge (ship-issue step 10) or a triage sweep, only when `scripts/check-verify-blocked.mjs` says eligible (#2011) | auto-verify, once no unchecked `verify-after` line remains; **or the closed-issue sweep (#1037)** |
 | `body-drift` | daily guard, when stray unchecked boxes exist | daily guard, once the body is synced (self-healing); **or the closed-issue sweep (#1037)** |
 | `verify-overdue` | daily job, on every ping | daily job, once the issue is no longer due (self-healing since #966); **or the closed-issue sweep (#1037)** |
 | `verify-undecidable` | daily guard, on a not-yet-due line carrying neither `assert:` nor `durable:` (#1206) | daily guard, once a marker is added or the date arrives (self-healing); **or the closed-issue sweep (#1037)** |
@@ -258,7 +258,7 @@ of them, unconditionally (no date logic: closed is closed). Grouped into one edi
 bounded query per label. This is what makes the labels safe to filter on in triage: a hit means current
 state.
 
-> **Reopening a swept issue does not restore `verify-blocked` — re-add it by hand.** Closing is terminal
+> **Reopening a swept issue does not restore `verify-blocked` — re-add it by hand when `scripts/check-verify-blocked.mjs` says eligible.** Closing is terminal
 > for the *obligation*, not for the *issue*. Only `verify-overdue` comes back on its own (the next ping;
 > that path is gated on the scanned set, not on any label). **Nothing in this job ever adds
 > `verify-blocked`** — it is applied by hand at merge. And because `isDriftCandidate` gates on

@@ -228,8 +228,9 @@ is the *procedure* — follow it top to bottom.
       merge + resolve all THEN deploy once (no half-deploys).
     - **Sync the issue body NOW — do NOT defer to close.** When the PR used `refs #N` (the issue stays
       open for a `verify-after`), immediately reconcile the body: **tick every shipped `- [ ]` box**, add
-      a dated `> **Status (YYYY-MM-DD):**` line summarizing what shipped + what remains, and apply the
-      **`verify-blocked`** label. Why here and not step 11: step 11's checklist-sync fires at CLOSE, but a
+      a dated `> **Status (YYYY-MM-DD):**` line summarizing what shipped + what remains, then apply the
+      **`verify-blocked`** label only if `node scripts/check-verify-blocked.mjs N` exits 0 (#2011) — an
+      issue with a later phase or a decision still open does not get it. Why here and not step 11: step 11's checklist-sync fires at CLOSE, but a
       verify-blocked issue never reaches close for weeks — so its body silently drifts (shipped code still
       showing `- [ ]`) until a triage sweep finds it. This is the single most-missed sync (it's a late,
       no-gate step in GitHub, a different system than the git diff the hooks watch). The daily
