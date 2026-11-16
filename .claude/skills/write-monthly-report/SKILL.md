@@ -256,6 +256,10 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
        alternative`, `99.97% uptime (Platform)`).
      - **Cross-references**: `— see [Section](#anchor)` in EN, `(<a href="#anchor">Section</a> 참고)` in KO. A
        Notable Incidents item is `item 4` / `4번`, never `#4`, which reads as an issue number.
+     - **Dates**: day, then the month in full — `5 October`, `29–30 October`.
+     - **Score points**: `12 points`, `<1 point`, never `pts`.
+     - **Zero counts**: `no incidents`. Text the generator wrote keeps its own wording.
+     - **Probe detections**: `RTT degradation signals` (aiwatch-reports#178).
      - **KO mirror**: the same value in the same form, with only the units translated — `65h 32m` →
        `65시간 32분`, a score `58` → `58점` (`Fair 58점`), incidents `N건`, services `N곳`. Grade words,
        service names and section names stay in English.
