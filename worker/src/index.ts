@@ -2251,6 +2251,7 @@ import { parseReferralBody, recordReferral, type ReferralCounts } from './referr
 import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
+import { parseDeviceCheckBody, recordDeviceCheck, queryDeviceChecks } from './device-check-click'
 import { recordDrop, queryDrops } from './drop-log'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import { recordDegradation } from './degradation-count'
@@ -4497,6 +4498,7 @@ const workerExport = {
               console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
             }
             const historyClicks = await queryHistoryClicks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            const deviceChecks = await queryDeviceChecks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
             const drops = await queryDrops(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
 
             // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
@@ -4657,6 +4659,7 @@ const workerExport = {
               badgeTraffic,
               audience,
               historyClicks,
+              deviceChecks,
               drops,
               extActivity,
               statuslineTraffic,
@@ -4993,6 +4996,28 @@ const workerExport = {
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
           console.error('[history-click] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
+    // #2009 — consent-free completed "Check connection" check on an is-down page → WAE.
+    if (url.pathname === '/api/device-check') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+      if (request.method === 'POST') {
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
+        try {
+          const parsed = parseDeviceCheckBody(await request.json(), new Set(SERVICES.map(s => s.id)))
+          if (!parsed) return new Response(null, { status: 400, headers: cors })
+          const agent = classifyAgent(
+            (request.cf as { verifiedBotCategory?: unknown } | undefined)?.verifiedBotCategory,
+            request.headers.get('User-Agent'),
+          )
+          recordDeviceCheck(env.ANALYTICS, parsed.svc, parsed.active, parsed.surface, agent, parsed.outcome)
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
+          console.error('[device-check] ingest error:', err instanceof Error ? err.message : err)
           return new Response(null, { status: 500, headers: cors })
         }
       }

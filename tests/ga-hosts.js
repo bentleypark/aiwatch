@@ -16,4 +16,5 @@ export const GA_HIT_RE = /(google-analytics\.com|analytics\.google\.com)\//
 // #1436 — the is-down audience beacon (`api/_shared/audience-beacon.ts`) posts to the PRODUCTION
 // worker from any host, including the Vercel Preview the Edge E2E job runs against, whose origin the
 // worker allows. Unblocked, every PR run booked its page loads as real audience in `growth:daily`.
-export const AUDIENCE_BEACON_RE = /\/api\/pageview(?:$|[?#])/
+// #2009 — also the "Check connection" counter (`/api/device-check`).
+export const AUDIENCE_BEACON_RE = /\/api\/(?:pageview|device-check)(?:$|[?#])/

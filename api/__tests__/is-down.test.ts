@@ -189,6 +189,49 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     expect(new URL(String(statusCall?.[0])).searchParams.get('series')).toBe('0')
   })
 
+  describe('device check button (#2009)', () => {
+    const workerFor = (id: string) => new Response(JSON.stringify({
+      services: [{ id, name: id, category: 'api', status: 'operational', latency: 250, uptime30d: 99.9, lastChecked: new Date().toISOString(), incidents: [], aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high' }],
+      aiAnalysis: {},
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const connectSrc = (res: Response) => (res.headers.get('Content-Security-Policy') ?? '').split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src')) ?? ''
+
+    it('a readable provider gets the button and its host in this response\'s connect-src', async () => {
+      fetchMock.mockResolvedValueOnce(workerFor('claude'))
+      const res = await handler(makeReq('claude-api'))
+      expect(await res.text()).toContain('data-action="device-check"')
+      expect(connectSrc(res)).toContain('https://api.anthropic.com')
+    })
+
+    it('an unreadable provider gets neither the button nor a wider connect-src', async () => {
+      fetchMock.mockResolvedValueOnce(workerFor('replicate'))
+      const res = await handler(makeReq('replicate'))
+      expect(await res.text()).not.toContain('data-action="device-check"')
+      expect(connectSrc(res)).not.toContain('replicate.com')
+    })
+
+    it('tells the counter whether the page was rendered during an outage', async () => {
+      for (const [status, active] of [['operational', 'false'], ['degraded', 'true'], ['down', 'true']] as const) {
+        const body = await workerFor('claude').json()
+        body.services[0].status = status
+        fetchMock.mockImplementation(async (input) => String(input).includes('/api/report-feed')
+          ? new Response(JSON.stringify({ reports: [] }), { status: 200 })
+          : new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        const html = await (await handler(makeReq('claude-api'))).text()
+        expect(html.match(/<section class="device-check"[^>]*>/)![0], status).toContain(`data-active="${active}"`)
+      }
+    })
+
+    it('the click handler is hashed into the same response\'s script-src', async () => {
+      fetchMock.mockResolvedValueOnce(workerFor('claude'))
+      const res = await handler(makeReq('claude-api'))
+      const html = await res.text()
+      const { extractInlineScripts, sha256Base64 } = await import('../_shared/csp-hash')
+      const block = extractInlineScripts(html).find((s) => s.includes('function runDeviceCheck'))!
+      expect(res.headers.get('Content-Security-Policy')).toContain(`'sha256-${await sha256Base64(block)}'`)
+    })
+  })
+
   it('returns 404 for an unknown slug regardless of Worker state', async () => {
     fetchMock.mockResolvedValueOnce(makeWorkerSuccess())
     const res = await handler(makeReq('not-a-real-service'))

@@ -17,6 +17,7 @@ PREV="${VERCEL_GIT_PREVIOUS_SHA:-}"
 diff_exit=0
 # The worker/ files src/ and api/ import; scripts/vercel-should-build.test.mjs fails when one is missing.
 WORKER_IMPORTS=(
+  worker/src/device-check-readable.ts
   worker/src/fallback.ts
   worker/src/incident-text.ts
   worker/src/last-good-copy-path.ts

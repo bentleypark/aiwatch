@@ -17,7 +17,7 @@ import { formatDropLine, type DropCount } from './drop-log'
 import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } from './monthly-archive'
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { ALERTED_NEW_TTL_S, FAMILY_OF_SERVICE, parseAlertedRoster } from './alerts'
-import type { HistoryClickCounts } from './history-click'
+import type { ClickRateCounts, HistoryClickCounts } from './history-click'
 import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
 import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
@@ -156,6 +156,8 @@ export interface DailySummaryData {
   audience?: AudienceCounts | null
   // #1612 — last-24h is-down "30-day history" clicks and views by phase (WAE). null when unconfigured.
   historyClicks?: HistoryClickCounts | null
+  // #2009 — last-24h completed "Check connection" checks and the views of the pages that carry the button (WAE). null when unconfigured.
+  deviceChecks?: ClickRateCounts | null
   /** #1257 — `null` = not read (no credentials, or the query failed); the line says so. */
   drops?: DropCount[] | null
   // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
@@ -421,6 +423,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (audienceLine) lines.push(audienceLine)
   const historyClickLine = formatHistoryClickLine(data.historyClicks)
   if (historyClickLine) lines.push(historyClickLine)
+  const deviceCheckLine = formatDeviceCheckLine(data.deviceChecks)
+  if (deviceCheckLine) lines.push(deviceCheckLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
@@ -654,6 +658,14 @@ export function formatHistoryClickLine(counts: HistoryClickCounts | null | undef
   if (!counts) return ''
   const part = (label: string, c: { clicks: number; views: number }) => `${label} ${c.clicks} clicks / ${c.views} views`
   return `📜 **30-day History Link** (24h): ${part('during outages', counts.active)} · ${part('clear', counts.clear)}`
+}
+
+/** #2009 — completed "Check connection" checks over the views of the pages that carry the button,
+ *  split by outage phase, flagged bots excluded. Rendered at 0 checks too, so every day of the measurement window leaves a line. */
+export function formatDeviceCheckLine(counts: ClickRateCounts | null | undefined): string {
+  if (!counts) return ''
+  const part = (label: string, c: { clicks: number; views: number }) => `${label} ${c.clicks} checks / ${c.views} views`
+  return `🌐 **Check Connection** (24h): ${part('during outages', counts.active)} · ${part('clear', counts.clear)}`
 }
 
 /** #1083 — flagged-bot views as a share of each number above. `''` until a tagged row exists. */

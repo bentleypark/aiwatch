@@ -9,6 +9,7 @@ import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
+import { renderDeviceCheckGroup, deviceCheckGroupConnectSrc, DEVICE_CHECK_CSS, DEVICE_CHECK_JS } from './_shared/device-check'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
@@ -222,6 +223,7 @@ function renderGroupPage(
   maintenances: NonNullable<ServiceData['scheduledMaintenances']> = [],
 ): string {
   const headline = worstStatus(members)
+  const outageActive = headline === 'down' || headline === 'degraded'
   // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
   // status, so the (active-flag, svcId) pair the WAE row stores cannot contradict itself. `headline`
   // is always a status some member holds, so the `??` is belt-and-braces, not the all-operational
@@ -606,6 +608,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
   .report-actions { display:flex; gap:10px; margin-top:18px; }
   .report-actions .btn { flex:1; }
   .report-msg { margin:12px 0 0; color:#3fb950; font-size:13px; }
+  ${DEVICE_CHECK_CSS}
 </style>
 <script>${LAST_CHECKED_CLIENT_JS}</script>
 </head>
@@ -617,6 +620,7 @@ ${referenceSection}${summarySection}
 ${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
+${renderDeviceCheckGroup(members, outageActive)}
 ${renderScheduledMaintenance(maintenances, 'ongoing')}${renderScheduledMaintenance(maintenances, 'upcoming')}
 ${incidentSection}
 ${communityReportSection}
@@ -634,7 +638,7 @@ ${reportSection}
 // service that had no outage.
 // (No backticks in this comment: it sits inside a template literal — see #842-B.)
 // #1280 — 'group' is what makes beaconSvcId readable; see worker/src/outage-audience.ts.
-${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded', 'group')}
+${audienceBeaconScript(beaconSvcId, outageActive, 'group')}
 // #1243 — hold the BUTTON in a variable instead of reading e.currentTarget inside the async callback.
 // The DOM resets currentTarget to null once dispatch finishes, and the clipboard promise resolves
 // after that, so the old code threw a TypeError in .then(): the copy succeeded but the confirmation
@@ -712,6 +716,7 @@ ${REPORT_GUARD_CLIENT_JS}  var modal = document.getElementById('report-modal'), 
       .catch(function(){ message.hidden = false; message.textContent = 'Could not send — please try again later'; submit.disabled = false })
   })
 })()
+${deviceCheckGroupConnectSrc(members).length > 0 ? DEVICE_CHECK_JS : ''}
 // #482-style delegated GA4 hook — CSP-clean (no inline handlers). Maps the subset of data-ga-*
 // attributes this page emits; the individual pages' listener (html-template.ts) maps more, so an
 // attribute copied from there would be dropped here without one added below.
@@ -719,7 +724,7 @@ document.addEventListener('click', function(e){
   var g = e.target.closest('[data-ga]')
   if (!g) return
   var d = g.dataset
-  ${historyClickBeacon(headline === 'down' || headline === 'degraded', 'group')}
+  ${historyClickBeacon(outageActive, 'group')}
   if (typeof gtag !== 'function') return
   var p = {}
   if (g.dataset.gaLoc) p.location = g.dataset.gaLoc
@@ -1035,7 +1040,7 @@ export default async function handler(req: Request) {
     else if (memberMissing) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: 'service_missing' }, `is-down-group/${familyKey}`)
 
     const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents, maintenances)
-    const csp = await cspForHtml(html, { enforce: true })
+    const csp = await cspForHtml(html, { enforce: true, extraConnectSrc: deviceCheckGroupConnectSrc(members) })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache
     // that render, exactly like the single-service page.

@@ -15,6 +15,7 @@ import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { lastedLine, resolvedDurationMin } from '../../worker/src/prediction-accuracy'
 import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
+import { renderDeviceCheck, DEVICE_CHECK_CSS } from '../_shared/device-check'
 import { slackInstallUrl, slackLogoSvg } from '../_shared/slack-install'
 import type { RegionStatusResult } from './region-status'
 import { maintenanceHasEnded, maintenanceIsOngoing } from '../../worker/src/maintenance-phase'
@@ -582,6 +583,7 @@ export function renderPage(
   const ogTitle = service
     ? `Is ${seo.displayName} Down? ${statusTitleLabel(ogStatus)} | AIWatch`
     : title
+  const outageActive = service ? ['down', 'degraded'].includes(assertableStatus(service)) : false
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -720,6 +722,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 .rep-toggle:checked~.rep-more-label .rep-more-open{display:none}
 .rep-toggle:checked~.rep-more-label .rep-more-close{display:inline}
 .rep-toggle:focus-visible~.rep-more-label{outline:2px solid #58a6ff;outline-offset:2px}
+${DEVICE_CHECK_CSS}
 .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .links a{font-size:13px;padding:6px 12px;background:#161b22;border:1px solid rgba(255,255,255,0.07);border-radius:4px;color:#8b949e}
 .links a:hover{color:#e6edf3;text-decoration:none}
@@ -741,6 +744,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORES, { loc: 'is_down_page', variant: 'is-down' }) : ''}
+${renderDeviceCheck(resolveBeaconSvcId(slug, service), outageActive)}
 ${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups, estimateAccuracy ?? undefined)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
@@ -760,7 +764,7 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners(resolveBeaconSvcId(slug, service), service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
+${renderDelegatedListeners(resolveBeaconSvcId(slug, service), outageActive)}
 ${cookieBannerHtml()}
 </body>
 </html>`

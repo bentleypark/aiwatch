@@ -418,3 +418,69 @@ test.describe('Is X Down? SSR pages', () => {
     })
   })
 })
+
+// #2009 — the floating "Check connection" button. Where the browser puts the boxes decides the layout,
+// so this reads real rectangles instead of CSS text. The provider's answer is fulfilled by a route:
+// no network, and the same status every run.
+test.describe('Check connection button (#2009)', () => {
+  const PAGES = [
+    { path: '/is-openai-api-down', host: 'api.openai.com', surface: 'service' },
+    { path: '/is-openai-down', host: 'api.openai.com', surface: 'group' },
+  ]
+  const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 375, height: 812 }]
+  const rect = (page, sel) => page.evaluate((s) => {
+    const r = document.querySelector(s).getBoundingClientRect()
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height }
+  }, sel)
+  const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
+  for (const { path, host, surface } of PAGES) {
+    for (const vp of VIEWPORTS) {
+      test(`${path} at ${vp.width}px: above Report an issue, the answer card fits the screen and closes`, async ({ page }) => {
+        await page.setViewportSize(vp)
+        await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'denied') } catch { /* storage blocked */ } })
+        await page.route(`https://${host}/**`, (route) => route.fulfill({ status: 401, headers: { 'access-control-allow-origin': '*' }, body: '' }))
+        await page.goto(path, { waitUntil: 'domcontentloaded' })
+
+        const pill = page.locator('.dc-pill')
+        await expect(pill).toContainText('Check connection')
+
+        // Before a click: only the pill is on screen, stacked directly above the report button.
+        await expect(page.locator('.dc-close')).toBeHidden()
+        await expect(page.locator('.dc-note')).toBeHidden()
+        expect((await rect(page, '.dc-card')).height).toBe(0)
+        const p0 = await rect(page, '.dc-pill')
+        const fab = await rect(page, '.report-fab')
+        expect(overlap(p0, fab)).toBe(false)
+        expect(p0.bottom).toBeLessThanOrEqual(fab.top)
+        expect(Math.abs(p0.right - fab.right)).toBeLessThanOrEqual(1)
+        expect(p0.left).toBeGreaterThanOrEqual(0)
+
+        // After a click: the card holds the answer and the note, inside the viewport, off both buttons.
+        // The finished check also posts to the consent-free counter; the fixture aborts that POST, so
+        // the request is read as it fails.
+        const counted = page.waitForEvent('requestfailed', (req) => req.url().endsWith('/api/device-check'))
+        await pill.click()
+        await expect(page.locator('[data-device-out]')).toContainText('HTTP 401')
+        const counter = await counted
+        expect(counter.failure()?.errorText).toBe('net::ERR_BLOCKED_BY_CLIENT.Inspector')
+        const posted = JSON.parse(counter.postData())
+        expect(posted).toMatchObject({ svc: 'openai', surface, outcome: 'ok' })
+        expect(typeof posted.active).toBe('boolean')
+        await expect(page.locator('.dc-note')).toContainText('not through AIWatch')
+        await expect(page.locator('.dc-close')).toBeVisible()
+        const card = await rect(page, '.dc-card')
+        expect(card.left).toBeGreaterThanOrEqual(0)
+        expect(card.right).toBeLessThanOrEqual(vp.width)
+        expect(overlap(card, await rect(page, '.dc-pill'))).toBe(false)
+        expect(overlap(card, await rect(page, '.report-fab'))).toBe(false)
+
+        // Closing empties the card and hands focus back to the pill.
+        await page.locator('.dc-close').click()
+        await expect.poll(async () => (await rect(page, '.dc-card')).height).toBe(0)
+        await expect(page.locator('.dc-close')).toBeHidden()
+        await expect(pill).toBeFocused()
+      })
+    }
+  }
+})

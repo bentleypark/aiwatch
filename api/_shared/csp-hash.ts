@@ -40,8 +40,9 @@ export async function sha256Base64(s: string): Promise<string> {
  * Build the CSP header (key + value) whose `script-src` allows exactly the given script hashes.
  * `enforce` picks Report-Only (Phase 2) vs enforcing `Content-Security-Policy` (Phase 3).
  */
-export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean } = {}): { key: string; value: string } {
+export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean; extraConnectSrc?: string[] } = {}): { key: string; value: string } {
   const scriptHashes = hashes.map((h) => `'sha256-${h}'`).join(' ')
+  const extraConnect = (opts.extraConnectSrc ?? []).map((o) => ` ${o}`).join('')
   const value = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -49,7 +50,7 @@ export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean }
     "frame-ancestors 'none'",
     "form-action 'self' https://*.kakao.com",
     `script-src 'self' ${scriptHashes} https://www.googletagmanager.com https://t1.kakaocdn.net`,
-    "connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com",
+    `connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com${extraConnect}`,
     "img-src 'self' data: https://ai-watch.dev https://aiwatch-worker.p2c2kbf.workers.dev",
     "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
     "font-src 'self' https://fonts.gstatic.com",
@@ -60,7 +61,7 @@ export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean }
 }
 
 /** Render-then-hash convenience: extract inline scripts from `html`, hash them, build the header. */
-export async function cspForHtml(html: string, opts: { enforce?: boolean } = {}): Promise<{ key: string; value: string }> {
+export async function cspForHtml(html: string, opts: { enforce?: boolean; extraConnectSrc?: string[] } = {}): Promise<{ key: string; value: string }> {
   const scripts = extractInlineScripts(html)
   const hashes = await Promise.all(scripts.map(sha256Base64))
   // de-dupe identical scripts (e.g. repeated blocks) so the header stays compact

@@ -45,6 +45,23 @@ describe('buildCspWithHashes (#482)', () => {
   })
 })
 
+describe('extraConnectSrc (#2009)', () => {
+  const connectSrc = (value: string) => value.split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src'))!
+
+  it('appends the given origins to connect-src and leaves every other directive alone', () => {
+    const base = buildCspWithHashes(['AAA']).value
+    const extra = buildCspWithHashes(['AAA'], { extraConnectSrc: ['https://api.openai.com'] }).value
+    expect(connectSrc(extra).split(/\s+/).slice(-1)).toEqual(['https://api.openai.com'])
+    expect(extra.replace(' https://api.openai.com', '')).toBe(base)
+  })
+
+  it('is empty by default, and cspForHtml passes it through', async () => {
+    expect(connectSrc(buildCspWithHashes([]).value)).not.toContain('api.openai.com')
+    const { value } = await cspForHtml('<script>x()</script>', { extraConnectSrc: ['https://api.openai.com'] })
+    expect(connectSrc(value)).toContain('https://api.openai.com')
+  })
+})
+
 describe('cspForHtml (#482)', () => {
   it('hashes the page inline scripts so the policy is derived from the served content', async () => {
     const html = `<script>console.log('a')</script><script type="application/ld+json">{}</script>`
