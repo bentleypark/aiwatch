@@ -247,6 +247,10 @@ The authenticated scraper posts the bounded failure class `page-contract` only w
 - **`unknown` is the normal outcome, not an edge case.** Many `trackFetchFailure` sites in `services.ts` book no reason at all, so the parse arm cannot fire for them; which legs book is the `SourceParseFailure` union in `parse-failure-log.ts`, not a list here. Perplexity, the filed instance, was on a booking leg in 2026-09 and is not now. #1464 adopts #1460's structured contract on some of the legs that DO book; it does not make the rest book, and nothing tracks that today.
 - **The day key is read lazily** — once per sweep, and only once a service actually reaches the send — so the common "nothing due" cycle adds no KV read (#1224).
 
+### Mistral feed pushes refused — operator ops alert (#2014)
+
+Sent from the observation route by `observeMistralRejectedPushes`; its rules are in that function and its tests, its keys in [kv-schema](kv-schema.md).
+
 ### Edge SSR fallback (#378) — operator ops alert
 A Vercel Edge Function fires this from the REQUEST path, not the Worker's cron: it POSTs to the
 Worker's `/api/internal/edge-fallback` (bearer `EDGE_ALERT_TOKEN`), which dedups on a 5-minute KV
