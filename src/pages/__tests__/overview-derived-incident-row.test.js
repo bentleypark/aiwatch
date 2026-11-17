@@ -57,7 +57,7 @@ describe('#1715 — opening the Overview incident row', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
     await act(async () => { root.render(createElement(IncidentItem, { incident, lang: 'en', t: tag })) })
-    const row = container.firstElementChild.firstElementChild
+    const row = container.querySelector('[data-testid="incident-row-header"]')
     await act(async () => { row.click() })
     return { html: container.innerHTML, expandable: row.className.includes('cursor-pointer') }
   }

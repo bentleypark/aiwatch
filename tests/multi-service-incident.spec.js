@@ -55,7 +55,7 @@ test.describe('Multi-service incident display', () => {
     await analyzeBtn.click()
 
     // Modal should show all 3 service names in one card
-    const modal = page.locator('dialog')
+    const modal = page.locator('dialog[open]')
     await expect(modal).toBeVisible()
     await expect(modal.getByText('Claude API')).toBeVisible()
     await expect(modal.getByText('claude.ai')).toBeVisible()

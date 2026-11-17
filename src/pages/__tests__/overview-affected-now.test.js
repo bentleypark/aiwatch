@@ -185,38 +185,22 @@ describe('#1959 the incident header opens the timeline', () => {
   it('toggles the timeline on a header click, and a second click closes it', async () => {
     const { entryOf, cleanup } = await mount()
     const header = entryOf('OpenAI latency').querySelector('[data-testid="affected-incident-header"]')
-    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(header.closest('details').open).toBe(false)
     expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]')).toBeNull()
     await act(async () => { header.click() })
-    expect(header.getAttribute('aria-expanded')).toBe('true')
+    expect(header.closest('details').open).toBe(true)
     expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]').textContent).toContain('Root cause found in the gateway')
     await act(async () => { header.click() })
     expect(entryOf('OpenAI latency').querySelector('[data-testid="incident-timeline"]')).toBeNull()
     await cleanup()
   })
 
-  it('is a focusable button, and Enter and Space open it without scrolling the page', async () => {
+  it('is the summary of a details element, so the browser gives it focus and Enter/Space', async () => {
     const { entryOf, cleanup } = await mount()
     const header = entryOf('OpenAI latency').querySelector('[data-testid="affected-incident-header"]')
-    expect(header.getAttribute('role')).toBe('button')
-    expect(header.getAttribute('tabindex')).toBe('0')
-    const press = (key) => {
-      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
-      header.dispatchEvent(event)
-      return event
-    }
-    for (const key of ['Enter', ' ']) {
-      let event
-      await act(async () => { event = press(key) })
-      expect(event.defaultPrevented).toBe(true)
-      expect(header.getAttribute('aria-expanded')).toBe('true')
-      await act(async () => { press(key) })
-      expect(header.getAttribute('aria-expanded')).toBe('false')
-    }
-    let other
-    await act(async () => { other = press('a') })
-    expect(other.defaultPrevented).toBe(false)
-    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(header.tagName).toBe('SUMMARY')
+    expect(header.parentElement.tagName).toBe('DETAILS')
+    expect(header.parentElement.firstElementChild).toBe(header)
     await cleanup()
   })
 
@@ -278,5 +262,71 @@ describe('#1978 a member row shows the service\'s other open incidents', () => {
   it('shows nothing extra for a service with one open incident', async () => {
     const root = await rootOf(ALL)
     expect(root.querySelectorAll('[data-testid="affected-other-incident"]').length).toBe(0)
+  })
+})
+
+describe('#2013 with the Popover API the timeline floats instead of stretching the grid row', () => {
+  const STEP = { stage: 'identified', text: 'Root cause found in the gateway', at: new Date(Date.now() - 1_800_000).toISOString() }
+  const FIXTURE = [
+    svc('openai', 'OpenAI API', 'OpenAI', 'api', 'degraded', [{ ...inc('o-1', 'OpenAI latency'), timeline: [STEP] }]),
+    svc('claude', 'Claude API', 'Anthropic', 'api', 'down', [inc('a-1', 'Anthropic outage')]),
+  ]
+  const fireToggle = (el, newState, type = 'toggle') => {
+    const event = new Event(type)
+    Object.defineProperty(event, 'newState', { value: newState })
+    el.dispatchEvent(event)
+  }
+
+  async function mount() {
+    const proto = HTMLElement.prototype
+    const hidePopover = vi.fn(function () { fireToggle(this, 'closed') })
+    proto.hidePopover = hidePopover
+    const Overview = await setup(['openai', 'claude'], FIXTURE, 'en')
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => { root.render(createElement(Overview)) })
+    const entryOf = (title) => [...container.querySelectorAll('[data-testid="affected-entry"]')].find((e) => e.textContent.includes(title))
+    const cleanup = async () => { await act(async () => { root.unmount() }); container.remove(); delete proto.hidePopover }
+    return { entryOf, hidePopover, cleanup }
+  }
+
+  it('makes the header a popover button for a dialog that holds the timeline, outside the card flow', async () => {
+    const { entryOf, cleanup } = await mount()
+    const entry = entryOf('OpenAI latency')
+    const header = entry.querySelector('[data-testid="affected-incident-header"]')
+    const panel = entry.querySelector('[data-testid="affected-timeline-panel"]')
+    expect(header.tagName).toBe('BUTTON')
+    expect(header.hasAttribute('aria-expanded')).toBe(false)
+    expect(panel.tagName).toBe('DIALOG')
+    expect(panel.getAttribute('popover')).toBe('auto')
+    expect(header.getAttribute('popovertarget')).toBe(panel.id)
+    expect(document.getElementById(panel.getAttribute('aria-labelledby')).textContent).toBe('OpenAI latency')
+    expect(panel.querySelector('[data-testid="incident-timeline"]')).toBeNull()
+    await act(async () => { fireToggle(panel, 'open', 'beforetoggle') })
+    expect(panel.querySelector('[data-testid="incident-timeline"]').textContent).toContain('Root cause found in the gateway')
+    expect([...entry.querySelectorAll('[data-testid="incident-timeline"]')].every((n) => panel.contains(n))).toBe(true)
+    await cleanup()
+  })
+
+  it('follows the panel open state in the arrow, and the close button hides it and returns focus to the header', async () => {
+    const { entryOf, hidePopover, cleanup } = await mount()
+    const entry = entryOf('OpenAI latency')
+    const header = entry.querySelector('[data-testid="affected-incident-header"]')
+    const panel = entry.querySelector('[data-testid="affected-timeline-panel"]')
+    expect(header.textContent).toContain('▸')
+    await act(async () => { fireToggle(panel, 'open') })
+    expect(header.textContent).toContain('▾')
+    await act(async () => { panel.querySelector(`button[aria-label="${en['modal.close']}"]`).click() })
+    expect(hidePopover).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(header)
+    expect(header.textContent).toContain('▸')
+    await cleanup()
+  })
+
+  it('renders no panel for an incident with no timeline steps', async () => {
+    const { entryOf, cleanup } = await mount()
+    expect(entryOf('Anthropic outage').querySelector('[data-testid="affected-timeline-panel"]')).toBeNull()
+    await cleanup()
   })
 })

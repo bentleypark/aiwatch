@@ -1,7 +1,7 @@
 // Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, useId, useRef, Fragment } from 'react'
 import IncidentTimeline from '../components/IncidentTimeline'
 import ReportModal from '../components/ReportModal'
 import RecentUserReports from '../components/RecentUserReports'
@@ -30,7 +30,7 @@ import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
 import { mergeReferenceRows } from '../utils/referenceIncidents'
-import { buildAffectedEntries, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../utils/affectedServices'
+import { buildAffectedEntries, hasPopoverApi, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../utils/affectedServices'
 import { sharedUpstreamGroups } from '../../worker/src/shared-upstream'
 import { rowHighlight } from '../utils/rowHighlight'
 import { formatMaintenanceRange, maintenancePhaseKey, maintenanceWindowsOf } from '../utils/maintenance'
@@ -57,6 +57,8 @@ const INC_BAR_CLASS = {
 }
 
 // ── Sub-components ───────────────────────────────────────────
+
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-hi)]'
 
 const STAT_TOP_COLOR = {
   'text-[var(--green)]': 'var(--green)',
@@ -309,9 +311,86 @@ function CategoryTabs({ categoryFilter, setCategoryFilter, t }) {
   )
 }
 
+// #2013 — a row header and its detail. With the Popover API the detail floats under the header, so
+// the grid row it sits in never grows; without it, or when `inline`, the detail expands in place.
+function ExpandableDetail({ expandable, inline = false, renderHeader, children, layoutClass = '', hoverClass = 'hover:bg-[var(--bg2)]', style, staticStyle = style, inlineStyle, inlineClass, testIds = {}, t }) {
+  const [expanded, setExpanded] = useState(false)
+  const panelId = useId()
+  const titleId = useId()
+  const headerRef = useRef(null)
+  const panelRef = useRef(null)
+  const floating = expandable && !inline && hasPopoverApi()
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    const onBeforeToggle = (e) => { if (e.newState === 'open') setExpanded(true) }
+    const onToggle = (e) => setExpanded(e.newState === 'open')
+    panel.addEventListener('beforetoggle', onBeforeToggle)
+    panel.addEventListener('toggle', onToggle)
+    return () => {
+      panel.removeEventListener('beforetoggle', onBeforeToggle)
+      panel.removeEventListener('toggle', onToggle)
+    }
+  }, [floating])
+  const header = renderHeader({ expanded, titleId })
+  if (!expandable) {
+    return <div data-testid={testIds.header} className={layoutClass || undefined} style={staticStyle}>{header}</div>
+  }
+  const headerClass = `${layoutClass} cursor-pointer ${hoverClass} rounded transition-colors ${FOCUS_RING}`
+  if (floating) {
+    const closePanel = () => { panelRef.current?.hidePopover(); headerRef.current?.focus() }
+    return (
+      <>
+        <button
+          ref={headerRef}
+          type="button"
+          data-testid={testIds.header}
+          popoverTarget={panelId}
+          className={`w-[calc(100%+8px)] text-left ${headerClass}`}
+          style={style}
+        >
+          {header}
+        </button>
+        <dialog
+          ref={panelRef}
+          id={panelId}
+          popover="auto"
+          aria-labelledby={titleId}
+          data-testid={testIds.panel}
+          className="anchored-detail-panel"
+        >
+          <div className="sticky top-0 z-10 flex justify-end bg-[var(--bg1)]" style={{ paddingTop: '6px' }}>
+            <button
+              type="button"
+              onClick={closePanel}
+              aria-label={t('modal.close')}
+              className="text-[var(--text1)] hover:text-[var(--text0)] transition-colors"
+              style={{ fontSize: '16px', lineHeight: 1, padding: '2px 6px' }}
+            >
+              ×
+            </button>
+          </div>
+          {expanded && children}
+        </dialog>
+      </>
+    )
+  }
+  return (
+    <details open={expanded} onToggle={(e) => setExpanded(e.currentTarget.open)}>
+      <summary
+        data-testid={testIds.header}
+        className={`list-none [&::-webkit-details-marker]:hidden ${headerClass}`}
+        style={style}
+      >
+        {header}
+      </summary>
+      {expanded && <div className={inlineClass} style={inlineStyle}>{children}</div>}
+    </details>
+  )
+}
+
 // Grouped flap incidents (same title, same day) — compact expandable row (#496)
 export function GroupIncidentItem({ group, lang, t }) {
-  const [expanded, setExpanded] = useState(false)
   // Use canonical dominantGroupStatus (handles 'ongoing' alias + uniformStatus fast-path)
   const dominantStatus = dominantGroupStatus(group)
   const barCls = INC_BAR_CLASS[dominantStatus] ?? INC_BAR_CLASS.resolved
@@ -335,116 +414,113 @@ export function GroupIncidentItem({ group, lang, t }) {
       : t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))
   return (
     <div style={{ marginBottom: '8px' }}>
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        className="flex gap-2.5 items-start cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]"
+      <ExpandableDetail
+        expandable
+        layoutClass="flex gap-2.5 items-start"
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
-        onClick={() => setExpanded(v => !v)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v) } }}
-      >
-        <div
-          className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
-          style={{ width: '52px', paddingTop: '1px' }}
-          title={`${dateStr} · ${group.count} occurrences`}
-        >
-          {dateStr}
-        </div>
-        <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap" style={{ marginBottom: '2px' }}>
-            <div className="text-[12px] font-medium text-[var(--text0)] line-clamp-2">
-              {serviceName} — {group.heading}
-            </div>
+        inlineClass="border-l-2 border-[var(--border)]"
+        inlineStyle={{ marginLeft: '6px', paddingLeft: '8px', paddingTop: '4px', background: 'var(--bg0)', borderRadius: '0 4px 4px 0' }}
+        testIds={{ header: 'incident-group-header', panel: 'incident-group-panel' }}
+        t={t}
+        renderHeader={({ expanded, titleId }) => (
+          <>
             <span
-              className="shrink-0 mono bg-[var(--bg3)] text-[var(--text2)]"
-              style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.04em' }}
+              className="block mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
+              style={{ width: '52px', paddingTop: '1px' }}
+              title={`${dateStr} · ${group.count} occurrences`}
             >
-              {group.run ? groupBadgeText(group, t) : `×${group.count}`}
+              {dateStr}
             </span>
-            <span className="shrink-0 text-[9px] text-[var(--text2)]" aria-hidden="true">
-              {expanded ? '▾' : '▸'}
+            <span className={`block w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
+            <span className="block flex-1 min-w-0">
+              <span className="flex items-center gap-1.5 flex-wrap" style={{ marginBottom: '2px' }}>
+                <span id={titleId} className="text-[12px] font-medium text-[var(--text0)] line-clamp-2">
+                  {serviceName} — {group.heading}
+                </span>
+                <span
+                  className="shrink-0 mono bg-[var(--bg3)] text-[var(--text2)]"
+                  style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.04em' }}
+                >
+                  {group.run ? groupBadgeText(group, t) : `×${group.count}`}
+                </span>
+                <span className="shrink-0 text-[9px] text-[var(--text2)]" aria-hidden="true">
+                  {expanded ? '▾' : '▸'}
+                </span>
+              </span>
+              <span className="block mono text-[10px] text-[var(--text2)]">
+                {totalDuration
+                  ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
+              </span>
             </span>
-          </div>
-          <div className="mono text-[10px] text-[var(--text2)]">
-            {totalDuration
-              ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
-          </div>
-        </div>
-      </div>
-      {expanded && (
-        <div
-          className="border-l-2 border-[var(--border)]"
-          style={{ marginLeft: '6px', paddingLeft: '8px', paddingTop: '4px', background: 'var(--bg0)', borderRadius: '0 4px 4px 0' }}
-        >
-          {group.entries.map(inc => (
-            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} hideStatus={hidesEntryStatus(group, inc)} onInset lang={lang} t={t} />
-          ))}
-        </div>
-      )}
+          </>
+        )}
+      >
+        {group.entries.map(inc => (
+          <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} hideStatus={hidesEntryStatus(group, inc)} onInset inline lang={lang} t={t} />
+        ))}
+      </ExpandableDetail>
     </div>
   )
 }
 
-// Incident item with time + bar + content + accordion timeline
-export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = false }) {
-  const [expanded, setExpanded] = useState(false)
+// Incident item with time + bar + content + timeline
+export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = false, inline = false }) {
   const barCls = hideStatus ? 'bg-[var(--border-hi)]' : INC_BAR_CLASS[incidentDisplayStatus(incident)] ?? INC_BAR_CLASS.resolved
   const hasTimeline = (incident.timeline ?? []).length > 0
   const expandable = hasTimeline || incident.derived === 'status_history'
+  // #406: align the displayed date with the sort axis (`getLatestActivity`).
+  // Resolved → resolvedAt; monitoring/ongoing with a fresh timeline → last update;
+  // else startedAt. Tooltip exposes the full label so users can still tell whether
+  // the date is the start, an update, or the resolution.
+  const ctx = getContextualTime(incident, t)
+  const name = incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName
+  const durationText = incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))
   return (
     <div style={{ marginBottom: '8px' }}>
-      <div
-        className={`flex gap-2.5 items-start ${expandable ? `cursor-pointer ${rowHighlight(onInset).hover} rounded transition-colors` : ''}`}
+      <ExpandableDetail
+        expandable={expandable}
+        inline={inline}
+        layoutClass="flex gap-2.5 items-start"
+        hoverClass={rowHighlight(onInset).hover}
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
-        onClick={expandable ? () => setExpanded((v) => !v) : undefined}
-      >
-        {(() => {
-          // #406: align the displayed date with the sort axis (`getLatestActivity`).
-          // Resolved → resolvedAt; monitoring/ongoing with a fresh timeline → last update;
-          // else startedAt. Tooltip exposes the full label so users can still tell whether
-          // the date is the start, an update, or the resolution.
-          const ctx = getContextualTime(incident, t)
-          return (
-            <div
-              className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
+        testIds={{ header: 'incident-row-header', panel: 'incident-timeline-panel' }}
+        t={t}
+        renderHeader={({ expanded, titleId }) => (
+          <>
+            <span
+              className="block mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
               style={{ width: '52px', paddingTop: '1px' }}
               title={`${ctx.label} ${formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day })}`}
             >
               {formatDate(ctx.date, lang, { dayOnly: ctx.dayOnly, day: ctx.day }).split(' ').slice(0, 2).join(' ')}
-            </div>
-          )
-        })()}
-        <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <div className="text-[12px] font-medium text-[var(--text0)] truncate" style={{ marginBottom: '2px' }}>
-              {(incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName)} — {incident.title}
-            </div>
-            {expandable && expanded && (
-              <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
-            )}
-          </div>
-          <div className="mono text-[10px] text-[var(--text2)]">
-            {incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
-          </div>
-        </div>
-      </div>
-      {expanded && (
-        <div>
-          <IncidentTimeline
-            title={`${incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName} — ${incident.title}`}
-            subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${incidentDurationText(incident, t, incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
-            timeline={incident.timeline}
-            note={incidentNote(incident, t)}
-            onClose={() => setExpanded(false)}
-            hideHeader
-            t={t}
-            lang={lang}
-          />
-        </div>
-      )}
+            </span>
+            <span className={`block w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
+            <span className="block flex-1 min-w-0">
+              <span className="flex items-center gap-1.5">
+                <span id={titleId} className="block text-[12px] font-medium text-[var(--text0)] truncate" style={{ marginBottom: '2px' }}>
+                  {name} — {incident.title}
+                </span>
+                {expandable && expanded && (
+                  <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
+                )}
+              </span>
+              <span className="block mono text-[10px] text-[var(--text2)]">
+                {durationText}
+              </span>
+            </span>
+          </>
+        )}
+      >
+        <IncidentTimeline
+          title={`${name} — ${incident.title}`}
+          subtitle={`${formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}  ·  ${durationText}`}
+          timeline={incident.timeline}
+          note={incidentNote(incident, t)}
+          hideHeader
+          t={t}
+          lang={lang}
+        />
+      </ExpandableDetail>
     </div>
   )
 }
@@ -452,11 +528,9 @@ export function IncidentItem({ incident, lang, t, hideStatus = false, onInset = 
 // #1959 — the services affected right now, across every category: one entry per shared live incident,
 // newest start first. The category grid below it is unchanged.
 function AffectedEntry({ entry, lang, t, onSelect }) {
-  const [expanded, setExpanded] = useState(false)
   const { incident, members } = entry
   const stateLabel = incident?.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing')
   const expandable = isEntryExpandable(entry)
-  const toggle = () => setExpanded((v) => !v)
   return (
     <li
       data-testid="affected-entry"
@@ -464,31 +538,28 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
       style={{ borderLeft: `3px solid ${entry.status === 'down' ? 'var(--red)' : 'var(--amber)'}`, padding: '10px 12px' }}
     >
       {incident && (
-        <div
-          data-testid="affected-incident-header"
-          {...(expandable ? {
-            role: 'button',
-            tabIndex: 0,
-            'aria-expanded': expanded,
-            onClick: toggle,
-            onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } },
-          } : {})}
-          className={expandable ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]' : undefined}
-          style={expandable ? { padding: '2px 4px', margin: '-2px -4px 6px' } : { marginBottom: '6px' }}
+        <ExpandableDetail
+          expandable={expandable}
+          layoutClass="block"
+          style={{ padding: '2px 4px', margin: '-2px -4px 6px' }}
+          staticStyle={{ marginBottom: '6px' }}
+          inlineStyle={{ marginBottom: '6px' }}
+          testIds={{ header: 'affected-incident-header', panel: 'affected-timeline-panel' }}
+          t={t}
+          renderHeader={({ expanded, titleId }) => (
+            <>
+              <span className="flex items-start justify-between gap-2">
+                <span id={titleId} className="text-[12px] font-medium text-[var(--text0)]">{incident.title}</span>
+                {expandable && <span aria-hidden="true" className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>}
+              </span>
+              <span className="block mono text-[10px] text-[var(--text2)]">
+                {t('incidents.time.started')} {formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}
+                {' · '}{stateLabel}
+                {members.length > 1 && <>{' · '}{t('overview.affected.members').replace('{n}', members.length)}</>}
+              </span>
+            </>
+          )}
         >
-          <div className="flex items-start justify-between gap-2">
-            <div className="text-[12px] font-medium text-[var(--text0)]">{incident.title}</div>
-            {expandable && <span aria-hidden="true" className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>}
-          </div>
-          <div className="mono text-[10px] text-[var(--text2)]">
-            {t('incidents.time.started')} {formatDate(incident.startedAt, lang, { dayOnly: incident.derived === 'status_history', day: incident.derivedDay })}
-            {' · '}{stateLabel}
-            {members.length > 1 && <>{' · '}{t('overview.affected.members').replace('{n}', members.length)}</>}
-          </div>
-        </div>
-      )}
-      {expandable && expanded && (
-        <div style={{ marginBottom: '6px' }}>
           <IncidentTimeline
             title={incident.title}
             timeline={incident.timeline}
@@ -496,7 +567,7 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
             t={t}
             lang={lang}
           />
-        </div>
+        </ExpandableDetail>
       )}
       <ul role="list" className="flex flex-col" style={{ gap: '4px' }}>
         {members.map((svc) => {

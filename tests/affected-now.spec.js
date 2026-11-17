@@ -16,7 +16,7 @@ const svc = (id, name, category, provider, incidents) => ({
 })
 
 const ANTHROPIC = inc('anthropic-shared-1959', 'Anthropic shared errors 1959', 3 * H)
-const OPENAI = inc('openai-1959', 'OpenAI latency 1959', 5 * H)
+const OPENAI = { ...inc('openai-1959', 'OpenAI latency 1959', 5 * H), timeline: [{ stage: 'investigating', text: 'We are investigating elevated latency.', at: new Date(Date.now() - 5 * H).toISOString() }] }
 const CHATGPT = inc('chatgpt-1959', 'ChatGPT image errors 1959', 1 * H)
 const FAL = { ...inc('fal-1959', 'fal fix rolling out 1959', 2 * H), status: 'monitoring' }
 
@@ -98,6 +98,22 @@ test.describe('Affected now block (#1959)', () => {
     const entry = page.getByTestId('affected-entry').filter({ hasText: 'ChatGPT image errors 1959' })
     await expect(entry).toHaveCount(1)
     await expect(page.getByTestId('service-card').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
+  })
+
+  test('closing the timeline with a click leaves no focus ring on the header; keyboard focus still shows one (#2013)', async ({ page }) => {
+    const header = page.getByTestId('affected-entry').filter({ hasText: 'OpenAI latency 1959' }).getByTestId('affected-incident-header')
+    const ring = () => header.evaluate((el) => getComputedStyle(el).boxShadow)
+    await header.click()
+    const panel = page.getByTestId('affected-timeline-panel').filter({ hasText: 'elevated latency' })
+    await expect(panel).toBeVisible()
+    await panel.getByRole('button').first().click()
+    await expect(panel).toBeHidden()
+    await expect(header).toBeFocused()
+    expect(await ring()).toBe('none')
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expect(header).toBeFocused()
+    expect(await ring()).not.toBe('none')
   })
 
   for (const [name, id] of [['claude.ai', 'claudeai'], ['Claude Code', 'claudecode']]) {

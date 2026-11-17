@@ -3,7 +3,7 @@
 // The fixtures run category order against start order, and include a pair that shares an incident id
 // outside any family (deepseek + deepseekapp) and a family pair with different ids (openai + chatgpt).
 import { describe, it, expect } from 'vitest'
-import { buildAffectedEntries, anchorIncidentOf, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../affectedServices'
+import { buildAffectedEntries, anchorIncidentOf, hasPopoverApi, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../affectedServices'
 
 const H = 3_600_000
 const NOW = Date.parse('2026-11-11T12:00:00Z')
@@ -244,5 +244,18 @@ describe('otherOpenIncidentsOf (#1978)', () => {
     expect(otherOpenIncidentsOf(svc('a', 'A', 'degraded', [inc('only', ago(H))]))).toEqual([])
     expect(otherOpenIncidentsOf(svc('b', 'B', 'degraded', [inc('1', ago(H)), inc('2', ago(2 * H))], { incidentSourceStale: true }))).toEqual([])
     expect(otherOpenIncidentsOf(svc('c', 'C', 'degraded'))).toEqual([])
+  })
+})
+
+describe('hasPopoverApi (#2013)', () => {
+  const hide = () => {}
+  it.each([
+    ['a prototype with the popover property and hidePopover', { popover: null, hidePopover: hide }, true],
+    ['the popover property with no hidePopover (happy-dom shape)', { popover: null }, false],
+    ['hidePopover with no popover property', { hidePopover: hide }, false],
+    ['popover only inherited, not own', Object.create({ popover: null, hidePopover: hide }), false],
+    ['no prototype (server render)', undefined, false],
+  ])('%s → %s', (_label, proto, expected) => {
+    expect(hasPopoverApi(proto ?? null)).toBe(expected)
   })
 })
