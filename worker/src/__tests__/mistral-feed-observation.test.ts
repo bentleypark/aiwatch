@@ -5,9 +5,115 @@ import {
   MISTRAL_FEED_OBSERVATION_SOURCE,
   MISTRAL_PAGE_CONTRACT_ALERT_KEY,
   MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY,
+  MISTRAL_REJECTED_PUSH_ALERT_KEY,
+  MISTRAL_REJECTED_PUSH_CONSECUTIVE_KEY,
   observeMistralPageContract,
+  observeMistralRejectedPushes,
   parseMistralFeedObservation,
 } from '../mistral-feed-observation'
+
+const memoryKv = () => {
+  const store: Record<string, string> = {}
+  return {
+    store,
+    kv: {
+      get: async (key: string) => store[key] ?? null,
+      put: async (key: string, value: string) => { store[key] = value },
+      delete: async (key: string) => { delete store[key] },
+    },
+  }
+}
+const read = (delivery: 'stored' | 'rejected' | 'not-posted') => parseMistralFeedObservation(
+  delivery === 'not-posted' ? { delivery } : { delivery, listed: 22, fetched: 22, available: 22 },
+)!
+
+// #2014 — the terminal deliveries of every Mistral read on 2026-11-16 from 16:41Z to 19:41Z, in order (WAE
+// `mistral-feed-observation`).
+const READS_2026_11_16: Array<[string, 'stored' | 'rejected' | 'not-posted']> = [
+  ['16:41', 'stored'], ['16:55', 'not-posted'], ['16:56', 'rejected'], ['17:03', 'rejected'],
+  ['17:10', 'not-posted'], ['17:25', 'not-posted'], ['17:28', 'rejected'], ['17:40', 'not-posted'],
+  ['17:41', 'rejected'], ['17:55', 'not-posted'], ['18:08', 'stored'], ['18:10', 'not-posted'],
+  ['18:10', 'stored'], ['18:25', 'not-posted'], ['18:25', 'rejected'], ['18:40', 'not-posted'],
+  ['18:42', 'rejected'], ['18:54', 'rejected'], ['18:55', 'not-posted'], ['19:10', 'rejected'],
+  ['19:25', 'not-posted'], ['19:38', 'stored'], ['19:41', 'stored'],
+]
+
+describe('#2014 refused Mistral pushes', () => {
+  it('alerts on the second refusal of each window of 2026-11-16, and a stored push re-arms it', async () => {
+    const { kv } = memoryKv()
+    const send = vi.fn(async () => true)
+    const alertedAt: string[] = []
+    for (const [at, delivery] of READS_2026_11_16) {
+      const result = await observeMistralRejectedPushes(kv, read(delivery), send)
+      if (result.alerted) alertedAt.push(at)
+    }
+    expect(alertedAt).toEqual(['17:03', '18:42'])
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('a `not-posted` run neither counts as a refusal nor ends the streak', async () => {
+    const { kv } = memoryKv()
+    const send = vi.fn(async () => true)
+    await expect(observeMistralRejectedPushes(kv, read('rejected'), send)).resolves.toEqual({ consecutive: 1, alerted: false })
+    await expect(observeMistralRejectedPushes(kv, read('not-posted'), send)).resolves.toEqual({ consecutive: 1, alerted: false })
+    await expect(observeMistralRejectedPushes(kv, read('rejected'), send)).resolves.toEqual({ consecutive: 2, alerted: true })
+  })
+
+  it('one refusal followed by a stored push never alerts', async () => {
+    const { kv, store } = memoryKv()
+    const send = vi.fn(async () => true)
+    await observeMistralRejectedPushes(kv, read('rejected'), send)
+    await observeMistralRejectedPushes(kv, read('stored'), send)
+    await observeMistralRejectedPushes(kv, read('rejected'), send)
+    expect(send).not.toHaveBeenCalled()
+    expect(store[MISTRAL_REJECTED_PUSH_CONSECUTIVE_KEY]).toContain('1')
+  })
+
+  it('keeps the marker unwritten when Discord does not accept the send, so the next refusal retries', async () => {
+    const { kv, store } = memoryKv()
+    const send = vi.fn(async () => false)
+    await observeMistralRejectedPushes(kv, read('rejected'), send)
+    await expect(observeMistralRejectedPushes(kv, read('rejected'), send)).resolves.toEqual({ consecutive: 2, alerted: false })
+    expect(store[MISTRAL_REJECTED_PUSH_ALERT_KEY]).toBeUndefined()
+    send.mockResolvedValue(true)
+    await expect(observeMistralRejectedPushes(kv, read('rejected'), send)).resolves.toEqual({ consecutive: 3, alerted: true })
+  })
+
+  it('does not share a streak with the page-contract alert', async () => {
+    const { kv, store } = memoryKv()
+    const drift = parseMistralFeedObservation({ delivery: 'not-posted', failure: 'page-contract' })!
+    await observeMistralPageContract(kv, drift, async () => true)
+    await observeMistralRejectedPushes(kv, read('rejected'), async () => true)
+    expect(store[MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY]).toContain('1')
+    expect(store[MISTRAL_REJECTED_PUSH_CONSECUTIVE_KEY]).toContain('1')
+  })
+
+  it('the real route sends the Discord alert on the second refusal only', async () => {
+    const { kv } = memoryKv()
+    const discord = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', discord)
+    const routeEnv = {
+      STATUS_CACHE: kv,
+      MISTRAL_FEED_TOKEN: 'test-token',
+      DISCORD_WEBHOOK_URL: 'https://discord.example/webhook',
+      ANALYTICS: { writeDataPoint: vi.fn() },
+    } as unknown as Parameters<typeof workerModule.fetch>[1]
+    const post = () => workerModule.fetch(new Request('https://ai-watch.dev/api/internal/mistral-feed-observation', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delivery: 'rejected', listed: 22, fetched: 22, available: 22 }),
+    }), routeEnv, {} as ExecutionContext)
+    try {
+      expect((await (await post()).json() as { rejected: unknown }).rejected).toEqual({ consecutive: 1, alerted: false })
+      expect(discord).not.toHaveBeenCalled()
+      expect((await (await post()).json() as { rejected: unknown }).rejected).toEqual({ consecutive: 2, alerted: true })
+      expect(discord).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(discord.mock.calls[0])).toContain('Mistral feed pushes are being refused')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
 
 describe('#1383 Mistral feed observations', () => {
   it('derives partial from the two measured counters and preserves the loss magnitude', () => {

@@ -58,7 +58,7 @@ import { CACHE_TTL_SECONDS, CACHE_STALE_THRESHOLD_MS } from './cache-ttl'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { MISTRAL_FEED_KV_KEY, MISTRAL_FEED_TTL_S, isStorableRootlyFeed, rootlyScoringImpact, type StoredRootlyFeed } from './parsers/rootly'
 import { atlassianRosterEntries } from './parsers/statuspage'
-import { parseMistralFeedObservation, recordMistralFeedObservation, observeMistralPageContract } from './mistral-feed-observation'
+import { parseMistralFeedObservation, recordMistralFeedObservation, observeMistralPageContract, observeMistralRejectedPushes } from './mistral-feed-observation'
 import { recordStatusFetchRun } from './status-fetch-run'
 import { isDue, REFRESH_COMPONENT_INTERVAL_MS, REFRESH_COUNTER_INTERVAL_MS, shouldRequestRefresh, shouldScheduleRun } from './status-refresh'
 import { maybeDispatchWorkflow, DEEPSEEK_DISPATCH_CONFIG, MISTRAL_DISPATCH_CONFIG } from './workflow-dispatch'
@@ -2655,7 +2655,16 @@ export async function handleMistralFeedObservation(request: Request, env: Env, c
       color: 0xFFA500,
     })
   })
-  return json(200, { ok: true, coverage: observation.coverage, delivery: observation.delivery, contract })
+  // #2014
+  const rejected = await observeMistralRejectedPushes(env.STATUS_CACHE, observation, async () => {
+    if (!env.DISCORD_WEBHOOK_URL) return false
+    return sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+      title: '⚠️ Mistral feed pushes are being refused',
+      description: 'Two Mistral scraper runs read status.mistral.ai but the Worker did not accept their push, with no accepted push between them.\n\nSee the scraper log, e.g. `[scrape] unmapped component icon on <component>: <class>` (#1751).',
+      color: 0xFFA500,
+    })
+  })
+  return json(200, { ok: true, coverage: observation.coverage, delivery: observation.delivery, contract, rejected })
 }
 
 // ── POST /api/admin/rebuild-archive ─────────────────────────────

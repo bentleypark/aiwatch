@@ -12,7 +12,9 @@ export const MISTRAL_FEED_OBSERVATION_SOURCE = 'mistral-rootly'
 export const MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY = 'mistral:page-contract:consecutive'
 export const MISTRAL_PAGE_CONTRACT_ALERT_KEY = 'alerted:mistral-page-contract'
 export const MISTRAL_PAGE_CONTRACT_ALERT_TTL_S = 7 * 24 * 60 * 60
-const MISTRAL_PAGE_CONTRACT_CONSECUTIVE_TTL_S = 2 * 60 * 60
+export const MISTRAL_REJECTED_PUSH_CONSECUTIVE_KEY = 'mistral:rejected-push:consecutive'
+export const MISTRAL_REJECTED_PUSH_ALERT_KEY = 'alerted:mistral-rejected-push'
+const MISTRAL_STREAK_TTL_S = 2 * 60 * 60
 
 export type MistralFeedDelivery = 'stored' | 'rejected' | 'not-posted'
 export type MistralFeedCoverage = 'complete' | 'partial' | 'unavailable'
@@ -102,15 +104,28 @@ interface PageContractKv {
   delete(key: string): Promise<void>
 }
 
-async function readStreak(kv: PageContractKv): Promise<number> {
+async function readStreak(kv: PageContractKv, key: string): Promise<number> {
   try {
-    const raw = await kv.get(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
+    const raw = await kv.get(key)
     const parsed = raw ? JSON.parse(raw) : null
     return Number.isInteger(parsed?.count) && parsed.count >= 0 ? parsed.count : 0
   } catch {
     // A failed diagnostic read must not prevent recording the current confirmed run.
     return 0
   }
+}
+
+async function confirmStreak(
+  kv: PageContractKv,
+  keys: { streak: string; alert: string },
+  send: () => Promise<boolean>,
+): Promise<{ consecutive: number; alerted: boolean }> {
+  const consecutive = (await readStreak(kv, keys.streak)) + 1
+  await kv.put(keys.streak, JSON.stringify({ count: consecutive }), { expirationTtl: MISTRAL_STREAK_TTL_S })
+  if (consecutive < 2 || await kv.get(keys.alert)) return { consecutive, alerted: false }
+  const sent = await send()
+  if (sent) await kv.put(keys.alert, '1', { expirationTtl: MISTRAL_PAGE_CONTRACT_ALERT_TTL_S })
+  return { consecutive, alerted: sent }
 }
 
 /**
@@ -126,19 +141,25 @@ export async function observeMistralPageContract(
 ): Promise<{ consecutive: number; alerted: boolean }> {
   if (observation.failure !== 'page-contract') {
     if (observation.coverage === 'unavailable' && observation.delivery !== 'stored') {
-      return { consecutive: await readStreak(kv), alerted: false }
+      return { consecutive: await readStreak(kv, MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY), alerted: false }
     }
     await kv.delete(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY)
     if (observation.delivery === 'stored') await kv.delete(MISTRAL_PAGE_CONTRACT_ALERT_KEY)
     return { consecutive: 0, alerted: false }
   }
+  return confirmStreak(kv, { streak: MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY, alert: MISTRAL_PAGE_CONTRACT_ALERT_KEY }, send)
+}
 
-  const consecutive = (await readStreak(kv)) + 1
-  await kv.put(MISTRAL_PAGE_CONTRACT_CONSECUTIVE_KEY, JSON.stringify({ count: consecutive }), {
-    expirationTtl: MISTRAL_PAGE_CONTRACT_CONSECUTIVE_TTL_S,
-  })
-  if (consecutive < 2 || await kv.get(MISTRAL_PAGE_CONTRACT_ALERT_KEY)) return { consecutive, alerted: false }
-  const sent = await send()
-  if (sent) await kv.put(MISTRAL_PAGE_CONTRACT_ALERT_KEY, '1', { expirationTtl: MISTRAL_PAGE_CONTRACT_ALERT_TTL_S })
-  return { consecutive, alerted: sent }
+/** Count refused pushes not separated by a stored one (#2014); a `not-posted` run neither counts nor clears. */
+export async function observeMistralRejectedPushes(
+  kv: PageContractKv,
+  observation: NormalizedMistralFeedObservation,
+  send: () => Promise<boolean>,
+): Promise<{ consecutive: number; alerted: boolean }> {
+  const keys = { streak: MISTRAL_REJECTED_PUSH_CONSECUTIVE_KEY, alert: MISTRAL_REJECTED_PUSH_ALERT_KEY }
+  if (observation.delivery === 'rejected') return confirmStreak(kv, keys, send)
+  if (observation.delivery !== 'stored') return { consecutive: await readStreak(kv, keys.streak), alerted: false }
+  await kv.delete(keys.streak)
+  await kv.delete(keys.alert)
+  return { consecutive: 0, alerted: false }
 }
