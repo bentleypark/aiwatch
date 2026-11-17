@@ -4,7 +4,9 @@ import { test, expect } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 const H = 3_600_000
-const ago = (ms) => new Date(Date.now() - ms).toISOString()
+const NOW = new Date()
+NOW.setHours(12, 0, 0, 0)
+const ago = (ms) => new Date(NOW.getTime() - ms).toISOString()
 const step = (stage, text, msAgo) => ({ stage, text, at: ago(msAgo) })
 const flap = (n) => ({
   id: `fw-flap-2013-${n}`, title: 'Model flap 2013', status: 'resolved', impact: null,
@@ -22,8 +24,8 @@ const MOCK = {
     svc('openai', 'OpenAI API', 'OpenAI', [SINGLE]),
     svc('fireworks', 'Fireworks AI', 'Fireworks', [{ ...flap(1), status: 'investigating', resolvedAt: null, duration: null }, flap(2), flap(3)]),
   ],
-  reportFeed: { openai: [{ cat: 'errors', desc: 'gateway 2013', ts: Date.now() - 10 * 60_000 }] },
-  lastUpdated: new Date().toISOString(),
+  reportFeed: { openai: [{ cat: 'errors', desc: 'gateway 2013', ts: NOW.getTime() - 10 * 60_000 }] },
+  lastUpdated: NOW.toISOString(),
 }
 
 test.describe('Recent Incidents details (#2013)', () => {
@@ -31,6 +33,7 @@ test.describe('Recent Incidents details (#2013)', () => {
     await page.setViewportSize({ width: 1400, height: 1000 })
     await page.route('**/api/status**', (route) => route.fulfill({ json: MOCK }))
     await page.route('**/api/status/cached', (route) => route.fulfill({ json: MOCK }))
+    await page.clock.setFixedTime(NOW)
     await page.goto('/')
     await waitForDataLoad(page)
   })
