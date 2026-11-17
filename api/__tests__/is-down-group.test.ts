@@ -9,6 +9,7 @@ import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 import { spyFetchAsWorker } from './fetch-stub'
 import { expectEveryStoreLink } from '../_shared/__tests__/expect-store-links'
 import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
+import { DEVICE_CHECK_JS } from '../_shared/device-check'
 
 // Every handler invocation begins with the status fetch, and a degraded/down fixture may make a
 // second, best-effort report-feed request. Keep any unlisted call local to the test so a fixture
@@ -166,6 +167,52 @@ describe('is-down-group.ts', () => {
     expect(html).toContain("gtag('consent','default'")
     expect(html).toContain('id="aiwatch-cookie-banner"')
     expect(html).toContain('data-aiwatch-cb="accept"')
+  })
+
+  describe('device check button (#2009)', () => {
+    const family = (ids: Array<[string, string]>) => statusResponse(ids.map(([id, name]) => ({ id, name, status: 'operational' })))
+    const claude = (): Response => family([['claude', 'Claude API'], ['claudeai', 'claude.ai'], ['claudecode', 'Claude Code']])
+    const connectSrc = (res: Response) => (res.headers.get('Content-Security-Policy') ?? '').split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src')) ?? ''
+
+    it('each family page gets its one block and exactly that host in its own connect-src', async () => {
+      const cases: Array<[string, () => Response, string]> = [
+        ['claude', claude, 'api.anthropic.com'],
+        ['openai', () => family([['openai', 'OpenAI API'], ['chatgpt', 'ChatGPT'], ['codex', 'Codex']]), 'api.openai.com'],
+        ['xai', () => family([['xai', 'SpaceXSI API'], ['grok', 'Grok'], ['grokbot', 'Grok Bot'], ['cursor', 'Cursor']]), 'api.x.ai'],
+      ]
+      for (const [fam, make, host] of cases) {
+        fetchMock = spyFetchAsWorker().mockResolvedValueOnce(make())
+        const res = await handler(makeReq(fam))
+        const html = await res.text()
+        expect(html.match(/data-device-check /g), fam).toHaveLength(1)
+        expect(html, fam).toContain(`data-url="https://${host}/`)
+        expect(connectSrc(res), fam).toContain(`https://${host}`)
+        fetchMock.mockRestore()
+      }
+    })
+
+    it('the block\'s click handler is hashed into this response\'s script-src', async () => {
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(claude())
+      const res = await handler(makeReq('claude'))
+      const { extractInlineScripts, sha256Base64 } = await import('../_shared/csp-hash')
+      const script = extractInlineScripts(await res.text()).find((s) => s.includes('function runDeviceCheck'))!
+      expect(res.headers.get('Content-Security-Policy')).toContain(`'sha256-${await sha256Base64(script)}'`)
+    })
+
+    it('a click on the block reaches the check from the group page\'s own scripts', async () => {
+      fetchMock = spyFetchAsWorker().mockResolvedValueOnce(claude())
+      const html = await (await handler(makeReq('claude'))).text()
+      const probe = vi.fn().mockResolvedValue({ status: 401, body: null })
+      const block = html.match(/<section class="device-check"[\s\S]*?<\/section>/)![0]
+      expect(html.split(DEVICE_CHECK_JS)).toHaveLength(2)
+      document.body.innerHTML = block
+      vi.stubGlobal('fetch', probe)
+      ;(0, eval)(DEVICE_CHECK_JS)
+      document.querySelector('button')!.click()
+      await Promise.resolve()
+      expect(probe.mock.calls.filter(([u]) => u === 'https://api.anthropic.com/v1/models')).toHaveLength(1)
+      document.body.innerHTML = ''
+    })
   })
 
   it('the Claude family page carries one install link per extension store (#1773)', async () => {

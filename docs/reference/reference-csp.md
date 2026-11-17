@@ -85,6 +85,11 @@ script/handler** → refactor in Phase 2.
     keeps its `s-maxage=60` cache (it's the busiest, outage-viral SEO surface). The delegated handlers
     are a single always-rendered dispatcher (`[data-ga]` for GA4 + `[data-action]` for copy/share);
     this retired the `escJsForAttr` JS-string-in-attribute footgun.
+  - **`extraConnectSrc` (#2009)** — `cspForHtml` can append origins to `connect-src` for ONE response. A
+    per-service page adds only its own provider's origin (`deviceCheckConnectSrc` in
+    `api/_shared/device-check.ts`) for the "Check connection" button, and a family page the
+    origin of each testable member (`deviceCheckGroupConnectSrc`), so the shared policy in
+    `vercel.json` / `csp-nonce.ts` stays as it was.
   - The SPA keeps the static `vercel.json` Report-Only header.
 - **Phase 3** — flip each surface's own header to enforcing `Content-Security-Policy`, and **scope the
   `vercel.json` `/(.*)` CSP to exclude the migrated Edge routes** (else its nonce/hash-less policy

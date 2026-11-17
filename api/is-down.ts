@@ -6,6 +6,7 @@ import { renderPage } from './_is-down/html-template'
 import type { EstimateAccuracy, RecoveryBaseline } from '../worker/src/recovery-baseline-text'
 import { EXCLUDE_FALLBACK } from '../worker/src/fallback'
 import { cspForHtml } from './_shared/csp-hash'
+import { deviceCheckConnectSrc } from './_shared/device-check'
 import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { lastGoodView } from './_shared/last-good-copy'
@@ -259,7 +260,7 @@ export default async function handler(req: Request) {
     // page is edge-cached (the cached header's hashes match the cached body), so /is-down keeps its
     // s-maxage=60 edge cache (it's the busiest, outage-viral SEO surface). ENFORCING (Phase 3); the
     // SPA's vercel.json Report-Only header co-applies but never blocks, so the hash policy enforces.
-    const csp = await cspForHtml(html, { enforce: true })
+    const csp = await cspForHtml(html, { enforce: true, extraConnectSrc: deviceCheckConnectSrc(entry.id) })
     return new Response(html, {
       status: isFallback ? 503 : 200,
       headers: {

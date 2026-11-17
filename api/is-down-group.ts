@@ -9,6 +9,7 @@ import { buildShareUrl } from './_is-down/share-url'
 import { audienceBeaconScript } from './_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from './_shared/history-link'
 import { cspForHtml } from './_shared/csp-hash'
+import { renderDeviceCheckGroup, deviceCheckGroupConnectSrc, DEVICE_CHECK_CSS, DEVICE_CHECK_JS } from './_shared/device-check'
 import { hedgedJsonFetch } from './_shared/hedged-fetch'
 import { lastGoodView } from './_shared/last-good-copy'
 import { isDownCacheControl } from './_shared/is-down-cache'
@@ -606,6 +607,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
   .report-actions { display:flex; gap:10px; margin-top:18px; }
   .report-actions .btn { flex:1; }
   .report-msg { margin:12px 0 0; color:#3fb950; font-size:13px; }
+  ${DEVICE_CHECK_CSS}
 </style>
 <script>${LAST_CHECKED_CLIENT_JS}</script>
 </head>
@@ -617,6 +619,7 @@ ${referenceSection}${summarySection}
 ${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
+${renderDeviceCheckGroup(members)}
 ${renderScheduledMaintenance(maintenances, 'ongoing')}${renderScheduledMaintenance(maintenances, 'upcoming')}
 ${incidentSection}
 ${communityReportSection}
@@ -712,6 +715,7 @@ ${REPORT_GUARD_CLIENT_JS}  var modal = document.getElementById('report-modal'), 
       .catch(function(){ message.hidden = false; message.textContent = 'Could not send — please try again later'; submit.disabled = false })
   })
 })()
+${deviceCheckGroupConnectSrc(members).length > 0 ? DEVICE_CHECK_JS : ''}
 // #482-style delegated GA4 hook — CSP-clean (no inline handlers). Maps the subset of data-ga-*
 // attributes this page emits; the individual pages' listener (html-template.ts) maps more, so an
 // attribute copied from there would be dropped here without one added below.
@@ -1035,7 +1039,7 @@ export default async function handler(req: Request) {
     else if (memberMissing) await notifyEdgeFallback(WORKER_API, { surface: 'is-down-group', slug: familyKey, reason: 'service_missing' }, `is-down-group/${familyKey}`)
 
     const html = renderGroupPage(family, members, incidents, summary, communityReports, otherFamilies, ogStatusHint, ogIncidentToken, shareIncidentToken, referenceComponents, maintenances)
-    const csp = await cspForHtml(html, { enforce: true })
+    const csp = await cspForHtml(html, { enforce: true, extraConnectSrc: deviceCheckGroupConnectSrc(members) })
     // Mirrors is-down.ts's fallback semantics: a fetch failure renders "unknown" for every member
     // (never a fabricated status), and the 503 + no-store tells caches/crawlers not to trust or cache
     // that render, exactly like the single-service page.
