@@ -71,3 +71,16 @@ test('UI files keep the modern-web-guidance arm; tests and plain logic stay sile
   assert.equal(run('worker/src/parsers/__tests__/statuspage.test.ts').context, '')
   assert.equal(run('worker/src/score.ts').context, '')
 })
+
+test('extension files, popup styles included, point at the chrome-extensions skill; its tests stay silent', () => {
+  for (const p of [
+    'extension/manifest.json', 'extension/service-worker.js', 'extension/popup.js',
+    'extension/popup.html', 'extension/popup.css', 'extension/lib/render.js',
+  ]) {
+    const { context, audit } = run(p)
+    assert.match(context, /chrome-extensions/, p)
+    assert.match(audit, /chrome-ext:/, p)
+  }
+  assert.equal(run('extension/config.test.js').context, '')
+  assert.equal(run('extension/lib/manifest.test.js').context, '')
+})
