@@ -203,6 +203,35 @@ dialog:focus-visible {
   outline-offset: -2px;
 }
 
+/* ─── Anchored row-detail popover (#2013) ────────────────── */
+.anchored-detail-panel {
+  width: min(36rem, calc(100vw - 32px));
+  max-height: min(60dvh, 32rem);
+  overflow-y: auto;
+  margin: auto;
+  padding: 0 12px 10px;
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  background: var(--bg1);
+  color: var(--text0);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg0) 70%, transparent);
+}
+.anchored-detail-panel:popover-open { display: block; }
+.anchored-detail-panel::backdrop { background: transparent; }
+@supports (position-area: block-end) {
+  .anchored-detail-panel {
+    position-anchor: auto;
+    position-area: block-end span-inline-end;
+    position-try: most-height flip-block;
+    max-height: min(calc(100% - 8px), 32rem);
+    inset: auto;
+    margin: 4px 0;
+  }
+}
+@supports (width: anchor-size(width)) {
+  .anchored-detail-panel { width: anchor-size(width); min-width: min(20rem, calc(100vw - 32px)); }
+}
+
 /* ─── Ticker Bar Animation ───────────────────────────────── */
 @keyframes ticker-scroll {
   from { transform: translateX(0); }

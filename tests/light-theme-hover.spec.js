@@ -18,7 +18,7 @@ const MOCK = {
 }
 
 const SURFACES = [
-  { name: 'Overview', path: '/', group: '[role="button"][aria-expanded]', inset: 'xpath=following-sibling::div[1]', row: '.cursor-pointer' },
+  { name: 'Overview', path: '/', group: '[data-testid="incident-group-header"]', inset: 'xpath=following-sibling::dialog[1]', row: '[data-testid="incident-row-header"]', opened: (inset) => expect(inset).toBeVisible() },
   { name: 'ServiceDetails', path: '/#openai', group: 'button[aria-expanded]', inset: 'xpath=following-sibling::div[1]', row: '.cursor-pointer' },
   { name: 'Incidents', path: '/#incidents', group: '[role="row"][aria-expanded]', inset: 'xpath=following-sibling::div[@role="rowgroup"][1]', row: '[role="row"]' },
 ]
@@ -35,9 +35,10 @@ for (const theme of ['light', 'dark']) {
       const group = page.locator(s.group).filter({ hasText: 'Elevated error rates' }).first()
       await expect(group).toBeVisible({ timeout: 20000 })
       await group.click()
-      await expect(group).toHaveAttribute('aria-expanded', 'true')
-
       const inset = group.locator(s.inset)
+      if (s.opened) await s.opened(inset)
+      else await expect(group).toHaveAttribute('aria-expanded', 'true')
+
       const row = inset.locator(s.row).first()
       const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor)
       await expect(row).toBeVisible()

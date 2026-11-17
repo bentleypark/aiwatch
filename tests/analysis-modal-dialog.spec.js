@@ -43,7 +43,7 @@ test.describe('AnalysisModal — native dialog (#1879)', () => {
 
   test('opens as the only dialog, modal, and labelled by its heading', async ({ page }) => {
     const { dialog } = await open(page)
-    await expect(page.locator('dialog')).toHaveCount(1)
+    await expect(page.locator('dialog[open]')).toHaveCount(1)
     expect(await dialog.evaluate((el) => el.matches(':modal'))).toBe(true)
   })
 
@@ -53,7 +53,7 @@ test.describe('AnalysisModal — native dialog (#1879)', () => {
     await open(page)
     expect(await bodyOverflow()).toBe('hidden')
     await page.keyboard.press('Escape')
-    await expect(page.locator('dialog')).toHaveCount(0)
+    await expect(page.locator('dialog[open]')).toHaveCount(0)
     expect(await bodyOverflow()).toBe('')
   })
 
@@ -61,14 +61,14 @@ test.describe('AnalysisModal — native dialog (#1879)', () => {
     const { trigger, dialog } = await open(page)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
-    await expect(page.locator('dialog')).toHaveCount(0)
+    await expect(page.locator('dialog[open]')).toHaveCount(0)
     await expect(trigger).toBeFocused()
   })
 
   test('the close button closes it', async ({ page }) => {
     const { trigger, dialog } = await open(page)
     await dialog.getByRole('button', { name: /닫기|Close/i }).click()
-    await expect(page.locator('dialog')).toHaveCount(0)
+    await expect(page.locator('dialog[open]')).toHaveCount(0)
     await expect(trigger).toBeFocused()
   })
 
@@ -86,7 +86,7 @@ test.describe('AnalysisModal — native dialog (#1879)', () => {
     await expect(dialog).toBeVisible()
     const box = await dialog.boundingBox()
     await page.mouse.click(box.x + box.width / 2, Math.max(2, box.y - 20))
-    await expect(page.locator('dialog')).toHaveCount(0)
+    await expect(page.locator('dialog[open]')).toHaveCount(0)
   })
 })
 

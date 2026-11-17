@@ -42,6 +42,10 @@ export function isEntryExpandable(entry) {
   return (entry?.incident?.timeline ?? []).length > 0
 }
 
+export function hasPopoverApi(proto = globalThis.HTMLElement?.prototype) {
+  return !!proto && Object.hasOwn(proto, 'popover') && typeof proto.hidePopover === 'function'
+}
+
 /**
  * One entry per incident id that an affected service is listed under, plus one entry per affected
  * service with no usable incident.
