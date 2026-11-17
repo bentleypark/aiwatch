@@ -10,6 +10,7 @@
 #   • SDK / binding (ai-analysis / anthropic / package.json) → first-party skill, else context7 (#1410).
 #   • Frontend HTML/CSS/client-JS (src components/pages, *.jsx, *.css, Edge SSR html templates)
 #     → run the `modern-web-guidance` skill FIRST (a11y / Core Web Vitals / Baseline-safe APIs).
+#   • Browser extension (extension/**, incl. its popup markup/styles) → `chrome-extensions` skill (#2020).
 # Routing is pinned by scripts/tooling-trigger.test.mjs; trigger map in docs/reference/reference-tooling.md.
 #
 # Soft on purpose; every fire is logged via _audit.sh so `npm run hook-audit` can show whether it
@@ -27,7 +28,7 @@ FP=""
 while IFS= read -r candidate; do
   case "$candidate" in
     *__tests__*|*.test.*|*.spec.*) continue ;;
-    */worker/src/parsers/*|*/worker/src/services.ts|*/worker/src/changelog.ts|*/worker/src/security-monitor.ts|*/worker/src/platform-monitor.ts|*/worker/src/reddit.ts|*/worker/src/ai-analysis.ts|*/worker/src/anthropic.ts|*/package.json|*/src/components/*|*/src/pages/*|*.jsx|*.css|*html-template.ts|*/api/is-down.ts|*/api/intro.ts)
+    */extension/*|*/worker/src/parsers/*|*/worker/src/services.ts|*/worker/src/changelog.ts|*/worker/src/security-monitor.ts|*/worker/src/platform-monitor.ts|*/worker/src/reddit.ts|*/worker/src/ai-analysis.ts|*/worker/src/anthropic.ts|*/package.json|*/src/components/*|*/src/pages/*|*.jsx|*.css|*html-template.ts|*/api/is-down.ts|*/api/intro.ts)
       FP="$candidate"
       break
       ;;
@@ -38,6 +39,10 @@ done < <(hook_input_paths "$INPUT")
 msg=""
 note=""
 case "$FP" in
+  */extension/*)
+    msg="🧩 Browser extension touched — run the \`chrome-extensions\` skill FIRST (Manifest V3 / permissions / service worker / store review) before hand-writing extension APIs or manifest keys."
+    note="chrome-ext:${FP##*/}"
+    ;;
   */worker/src/parsers/*|*/worker/src/services.ts|*/worker/src/changelog.ts|*/worker/src/security-monitor.ts|*/worker/src/platform-monitor.ts|*/worker/src/reddit.ts)
     msg="🌐 External source touched (status page / feed) — fetch the LIVE upstream response and check its real shape BEFORE coding (curl or WebFetch; a 403/429 is a bot block, retry in the playwright MCP browser). No docs tool covers these sources."
     note="upstream:${FP##*/}"

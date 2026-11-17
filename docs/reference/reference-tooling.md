@@ -56,8 +56,8 @@ The `modern-web-guidance` skill auto-triggers on **HTML/CSS/client-JS** work —
 container queries, `:has()`, View Transitions, scroll-driven animations, Core Web Vitals (LCP/INP),
 forms/autofill, and React layout/style adaptation. Run it **first**, before hand-writing patterns
 from memory (web APIs evolve faster than training weights). **Skip** for backend/SQL/ORM, CI/CD,
-Docker, and generic local scripts. (The plugin also ships a `chrome-extensions` skill — not used by
-AIWatch.)
+Docker, and generic local scripts. The plugin also ships a `chrome-extensions` skill (Manifest V3,
+permissions, store publishing) — the one for `extension/` (#2020).
 
 ## Project gotchas the docs do not carry
 
@@ -82,6 +82,7 @@ backstop for the probabilistic triggers above:
 | `worker/src/parsers/**`, `services.ts`, `changelog.ts`, `security-monitor.ts`, `platform-monitor.ts`, `reddit.ts` (status pages / feeds) | fetch the **live upstream** response | `upstream:` |
 | `worker/src/ai-analysis.ts`, `worker/src/anthropic.ts`, `package.json` (SDK / binding) | **first-party skill**, else **context7** | `docs:` |
 | `src/components/**`, `src/pages/**`, `*.jsx`, `*.css`, Edge SSR `*html-template.ts`, `api/is-down.ts`, `api/intro.ts` (markup / styles / UI components) | **modern-web-guidance** skill — a11y / CWV / Baseline | `modern-web:` |
+| `extension/**`, its popup markup / styles included (browser extension) | **chrome-extensions** skill | `chrome-ext:` |
 | anything else — incl. non-UI client logic (`src/utils/*.js`, `src/hooks/*.js`), backend/score logic, and `*__tests__*` / `*.test.*` / `*.spec.*` | (silent — no reminder) | — |
 
 > Scope note: the frontend arm targets **markup/styles/UI components**, not all client-side JS — pure
