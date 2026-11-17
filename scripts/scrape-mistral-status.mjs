@@ -182,7 +182,7 @@ export async function runWithMistralFeedObservation(workerUrl, token, run, repor
 }
 
 /** The component icon's colour class → the status word `mapRootlyComponentStatus` reads. */
-const V3_ICON_STATUS = [[/\btext-pothos-/, 'Operational'], [/\btext-amber-/, 'Degraded'], [/\btext-red-/, 'Major Outage']]
+const V3_ICON_STATUS = [[/\btext-pothos-/, 'Operational'], [/\btext-amber-/, 'Degraded'], [/\btext-tangerine-/, 'Partial Outage'], [/\btext-red-/, 'Major Outage']]
 
 export const COMPONENT_STATES_WORDS = V3_ICON_STATUS.map((entry) => String(entry[1]))
 
