@@ -6,6 +6,9 @@ import {
   deviceCheckGroupTargets, deviceCheckGroupConnectSrc, renderDeviceCheckGroup,
 } from '../device-check'
 import { FAMILY_GROUPS, SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE } from '../../_is-down/slug-map'
+import { DEVICE_CHECK_OUTCOMES } from '../../../worker/src/device-check-click'
+
+const BEACON_URL = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/device-check'
 
 // #2009 — which providers a visitor's browser can read, the page block, and the shipped click handler.
 
@@ -49,7 +52,7 @@ describe('deviceCheckTarget / deviceCheckConnectSrc', () => {
   it('never borrows another service\'s endpoint — Codex signed in with ChatGPT does not call api.openai.com', () => {
     for (const id of ['claudecode', 'codex']) {
       expect(deviceCheckTarget(id), id).toBeNull()
-      expect(renderDeviceCheck(id), id).toBe('')
+      expect(renderDeviceCheck(id, false), id).toBe('')
     }
   })
 
@@ -67,12 +70,12 @@ describe('deviceCheckTarget / deviceCheckConnectSrc', () => {
 
 describe('renderDeviceCheck', () => {
   it('renders nothing for an unreadable provider', () => {
-    expect(renderDeviceCheck('replicate')).toBe('')
-    expect(renderDeviceCheck('chatgpt')).toBe('')
+    expect(renderDeviceCheck('replicate', false)).toBe('')
+    expect(renderDeviceCheck('chatgpt', false)).toBe('')
   })
 
   it('renders the button, the target and the click wiring for a readable one', () => {
-    const html = renderDeviceCheck('openai')
+    const html = renderDeviceCheck('openai', false)
     expect(html).toContain('data-url="https://api.openai.com/v1/models"')
     expect(html).toContain('data-action="device-check"')
     expect(html).toContain('data-ga="click_device_check"')
@@ -82,22 +85,28 @@ describe('renderDeviceCheck', () => {
   })
 
   it('renders the answer and note elements empty, with the note text carried in data-note', () => {
-    const html = renderDeviceCheck('openai')
+    const html = renderDeviceCheck('openai', false)
     expect(html).toMatch(/<p data-device-out aria-live="polite"><\/p>/)
     expect(html).toMatch(/<p class="dc-note" data-device-note><\/p>/)
     expect(html).toContain('data-note="The request goes straight from your browser, not through AIWatch."')
   })
 
+  it('carries what the counter reports: the surface and the outage state the page was rendered in', () => {
+    expect(renderDeviceCheck('openai', true)).toContain('data-active="true"')
+    expect(renderDeviceCheck('openai', false)).toContain('data-active="false"')
+    expect(renderDeviceCheck('openai', true)).toContain('data-surface="service"')
+  })
+
   it('labels the button like the report button: a hidden icon, then two words', () => {
-    expect(renderDeviceCheck('openai')).toContain('><span aria-hidden="true">🌐</span> <span data-device-label>Check connection</span></button>')
+    expect(renderDeviceCheck('openai', false)).toContain('><span aria-hidden="true">🌐</span> <span data-device-label>Check connection</span></button>')
   })
 
   it('carries the Claude request header on the block', () => {
-    expect(renderDeviceCheck('claude')).toContain('data-hdr="anthropic-dangerous-direct-browser-access:true"')
+    expect(renderDeviceCheck('claude', false)).toContain('data-hdr="anthropic-dangerous-direct-browser-access:true"')
   })
 
   it('does not promise a request count — a header makes the browser add a preflight', () => {
-    for (const id of ['claude', 'openai']) expect(renderDeviceCheck(id)).not.toMatch(/one request|single request/i)
+    for (const id of ['claude', 'openai']) expect(renderDeviceCheck(id, false)).not.toMatch(/one request|single request/i)
   })
 })
 
@@ -136,7 +145,7 @@ describe('a click on a rendered button reaches the check through the block\'s ow
     const fetchMock = vi.fn().mockResolvedValue({ status: 401, body: null })
     vi.stubGlobal('fetch', fetchMock)
     const inline = (html: string) => [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
-    const block = renderDeviceCheck('openai')
+    const block = renderDeviceCheck('openai', false)
     document.body.innerHTML = block.replace(/<script>[\s\S]*<\/script>/, '')
     const scripts = inline(block)
     expect(scripts).toHaveLength(1)
@@ -149,7 +158,7 @@ describe('a click on a rendered button reaches the check through the block\'s ow
   })
 
   it('the close button on the rendered card empties it', () => {
-    const block = renderDeviceCheck('openai')
+    const block = renderDeviceCheck('openai', false)
     document.body.innerHTML = block.replace(/<script>[\s\S]*<\/script>/, '')
     ;(0, eval)([...block.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1])
     const out = document.querySelector('[data-device-out]')!
@@ -179,17 +188,17 @@ describe('family pages', () => {
   })
 
   it('says only whose address it is and that it is not a website, never what other products call', () => {
-    expect(renderDeviceCheckGroup(members('claude'))).toContain('data-note="api.anthropic.com is the address of Claude API (not a website). The request goes straight from your browser, not through AIWatch."')
-    expect(renderDeviceCheckGroup(members('openai'))).toContain('data-note="api.openai.com is the address of OpenAI API (not a website). The request goes straight from your browser, not through AIWatch."')
-    expect(renderDeviceCheckGroup(members('xai'))).toContain('data-note="api.x.ai is the address of SpaceXSI API (not a website). The request goes straight from your browser, not through AIWatch."')
+    expect(renderDeviceCheckGroup(members('claude'), false)).toContain('data-note="api.anthropic.com is the address of Claude API (not a website). The request goes straight from your browser, not through AIWatch."')
+    expect(renderDeviceCheckGroup(members('openai'), false)).toContain('data-note="api.openai.com is the address of OpenAI API (not a website). The request goes straight from your browser, not through AIWatch."')
+    expect(renderDeviceCheckGroup(members('xai'), false)).toContain('data-note="api.x.ai is the address of SpaceXSI API (not a website). The request goes straight from your browser, not through AIWatch."')
     for (const family of Object.keys(FAMILY_GROUPS)) {
-      expect(renderDeviceCheckGroup(members(family)), family).not.toMatch(/does not test|Claude Code|Codex|ChatGPT|claude\.ai|Grok|Cursor/)
+      expect(renderDeviceCheckGroup(members(family), false), family).not.toMatch(/does not test|Claude Code|Codex|ChatGPT|claude\.ai|Grok|Cursor/)
     }
   })
 
   it('renders one block per family page and no script of its own, counted as a group-page click', () => {
     for (const family of Object.keys(FAMILY_GROUPS)) {
-      const html = renderDeviceCheckGroup(members(family))
+      const html = renderDeviceCheckGroup(members(family), false)
       expect(html.match(/data-device-check /g)).toHaveLength(1)
       expect(html).not.toContain('<script')
       expect(html).toContain('data-ga-loc="is_down_group_page"')
@@ -197,9 +206,32 @@ describe('family pages', () => {
     }
   })
 
+  it('tags each block as a group-page block with the outage state of the page', () => {
+    for (const family of Object.keys(FAMILY_GROUPS)) {
+      const down = renderDeviceCheckGroup(members(family), true)
+      expect(down, family).toContain('data-surface="group"')
+      expect(down, family).toContain('data-active="true"')
+      expect(renderDeviceCheckGroup(members(family), false), family).toContain('data-active="false"')
+    }
+  })
+
+  it('a finished check on a family page is counted for the member that was checked, on the group surface', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 401, body: null })
+    vi.stubGlobal('fetch', fetchMock)
+    document.body.innerHTML = renderDeviceCheckGroup(members('claude'), true)
+    loadClient().runDeviceCheck(document.querySelector('button')!)
+    await Promise.resolve()
+    await Promise.resolve()
+    const beacon = fetchMock.mock.calls.filter(([u]) => u === BEACON_URL)
+    expect(beacon).toHaveLength(1)
+    expect(JSON.parse(beacon[0][1].body)).toEqual({ svc: 'claude', active: true, surface: 'group', outcome: 'ok' })
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
   it('renders nothing when no member has a readable host', () => {
-    expect(renderDeviceCheckGroup([])).toBe('')
-    expect(renderDeviceCheckGroup([{ id: 'claudeai', name: 'claude.ai' }])).toBe('')
+    expect(renderDeviceCheckGroup([], false)).toBe('')
+    expect(renderDeviceCheckGroup([{ id: 'claudeai', name: 'claude.ai' }], false)).toBe('')
     expect(deviceCheckGroupConnectSrc([{ id: 'cursor', name: 'Cursor' }])).toEqual([])
   })
 })
@@ -208,8 +240,11 @@ describe('runDeviceCheck', () => {
   const c = loadClient()
   let fetchMock: ReturnType<typeof vi.fn>
 
-  function mount(svc: string): { btn: HTMLButtonElement; out: Element } {
-    document.body.innerHTML = renderDeviceCheck(svc).replace(/<script>[\s\S]*<\/script>/, '')
+  const probes = () => fetchMock.mock.calls.filter(([u]) => u !== BEACON_URL)
+  const beacons = () => fetchMock.mock.calls.filter(([u]) => u === BEACON_URL)
+
+  function mount(svc: string, active = false): { btn: HTMLButtonElement; out: Element } {
+    document.body.innerHTML = renderDeviceCheck(svc, active).replace(/<script>[\s\S]*<\/script>/, '')
     return { btn: document.querySelector('button')!, out: document.querySelector('[data-device-out]')! }
   }
 
@@ -238,8 +273,8 @@ describe('runDeviceCheck', () => {
     expect(icon.textContent).toBe('🌐')
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0]
+    expect(probes()).toHaveLength(1)
+    const [url, init] = probes()[0]
     expect(url).toBe('https://api.openai.com/v1/models')
     expect(init).toMatchObject({ method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', headers: {} })
     expect(cancel).toHaveBeenCalled()
@@ -277,7 +312,7 @@ describe('runDeviceCheck', () => {
     const { btn, out } = mount('claude')
     c.runDeviceCheck(btn)
     await vi.advanceTimersByTimeAsync(0)
-    expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'anthropic-dangerous-direct-browser-access': 'true' })
+    expect(probes()[0][1].headers).toEqual({ 'anthropic-dangerous-direct-browser-access': 'true' })
     expect(out.textContent).toContain('which may include a browser permission check')
   })
 
@@ -308,6 +343,77 @@ describe('runDeviceCheck', () => {
     c.runDeviceCheck(btn)
     c.runDeviceCheck(btn)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  describe('the consent-free counter', () => {
+    it('posts each finished check once, as a plain request with no custom header (no preflight)', async () => {
+      fetchMock.mockResolvedValue({ status: 401, body: null })
+      const { btn } = mount('openai')
+      c.runDeviceCheck(btn)
+      expect(beacons()).toHaveLength(0)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(beacons()).toHaveLength(1)
+      const [, init] = beacons()[0]
+      expect(init).toMatchObject({ method: 'POST', keepalive: true })
+      expect(init.headers).toBeUndefined()
+      expect(JSON.parse(init.body)).toEqual({ svc: 'openai', active: false, surface: 'service', outcome: 'ok' })
+    })
+
+    it('reports the outage state the page was rendered in', async () => {
+      fetchMock.mockResolvedValue({ status: 401, body: null })
+      c.runDeviceCheck(mount('openai', true).btn)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(JSON.parse(beacons()[0][1].body).active).toBe(true)
+    })
+
+    it('reports the class of every way a check can end, and only classes the worker accepts', async () => {
+      const seen: string[] = []
+      for (const answer of [
+        () => fetchMock.mockResolvedValue({ status: 200, body: null }),
+        () => fetchMock.mockResolvedValue({ status: 503, body: null }),
+        () => fetchMock.mockRejectedValue(new TypeError('Failed to fetch')),
+        () => fetchMock.mockImplementation((u: string, init: RequestInit) => u === BEACON_URL
+          ? Promise.resolve({ status: 204 })
+          : new Promise((_res, rej) => { init.signal!.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError'))) })),
+      ]) {
+        fetchMock.mockReset()
+        answer()
+        c.runDeviceCheck(mount('openai').btn)
+        await vi.advanceTimersByTimeAsync(8000)
+        expect(beacons()).toHaveLength(1)
+        seen.push(JSON.parse(beacons()[0][1].body).outcome)
+      }
+      expect(seen).toEqual(['ok', 'server_error', 'error', 'timeout'])
+      expect([...seen].sort()).toEqual([...DEVICE_CHECK_OUTCOMES].sort())
+    })
+
+    it('does not depend on analytics consent: no gtag on the page, the beacon still goes', async () => {
+      vi.stubGlobal('gtag', undefined)
+      fetchMock.mockResolvedValue({ status: 401, body: null })
+      c.runDeviceCheck(mount('openai').btn)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(beacons()).toHaveLength(1)
+    })
+
+    it('a beacon that throws or is rejected leaves the answer on screen and the button usable, and a rejection is handled', async () => {
+      let rejected: Promise<never> | undefined
+      let attach: ReturnType<typeof vi.spyOn> | undefined
+      for (const failBeacon of [
+        () => { throw new Error('blocked') },
+        () => { rejected = Promise.reject(new TypeError('Failed to fetch')); attach = vi.spyOn(rejected, 'then'); return rejected },
+      ]) {
+        // A plain function, not vi.fn: a mock attaches its own handler to a returned promise, which
+        // would make every rejection look handled.
+        vi.stubGlobal('fetch', (u: string) => u === BEACON_URL ? failBeacon() : Promise.resolve({ status: 401, body: null }))
+        const { btn, out } = mount('openai')
+        c.runDeviceCheck(btn)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(out.textContent).toMatch(/\(HTTP 401\)/)
+        expect(btn.hasAttribute('aria-disabled')).toBe(false)
+      }
+      expect(attach!.mock.calls.some(([, onRejected]) => typeof onRejected === 'function')).toBe(true)
+    })
   })
 
   it('refuses a non-https target', () => {

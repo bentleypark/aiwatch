@@ -424,8 +424,8 @@ test.describe('Is X Down? SSR pages', () => {
 // no network, and the same status every run.
 test.describe('Check connection button (#2009)', () => {
   const PAGES = [
-    { path: '/is-openai-api-down', host: 'api.openai.com' },
-    { path: '/is-openai-down', host: 'api.openai.com' },
+    { path: '/is-openai-api-down', host: 'api.openai.com', surface: 'service' },
+    { path: '/is-openai-down', host: 'api.openai.com', surface: 'group' },
   ]
   const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 375, height: 812 }]
   const rect = (page, sel) => page.evaluate((s) => {
@@ -434,7 +434,7 @@ test.describe('Check connection button (#2009)', () => {
   }, sel)
   const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
-  for (const { path, host } of PAGES) {
+  for (const { path, host, surface } of PAGES) {
     for (const vp of VIEWPORTS) {
       test(`${path} at ${vp.width}px: above Report an issue, the answer card fits the screen and closes`, async ({ page }) => {
         await page.setViewportSize(vp)
@@ -457,8 +457,16 @@ test.describe('Check connection button (#2009)', () => {
         expect(p0.left).toBeGreaterThanOrEqual(0)
 
         // After a click: the card holds the answer and the note, inside the viewport, off both buttons.
+        // The finished check also posts to the consent-free counter; the fixture aborts that POST, so
+        // the request is read as it fails.
+        const counted = page.waitForEvent('requestfailed', (req) => req.url().endsWith('/api/device-check'))
         await pill.click()
         await expect(page.locator('[data-device-out]')).toContainText('HTTP 401')
+        const counter = await counted
+        expect(counter.failure()?.errorText).toBe('net::ERR_BLOCKED_BY_CLIENT.Inspector')
+        const posted = JSON.parse(counter.postData())
+        expect(posted).toMatchObject({ svc: 'openai', surface, outcome: 'ok' })
+        expect(typeof posted.active).toBe('boolean')
         await expect(page.locator('.dc-note')).toContainText('not through AIWatch')
         await expect(page.locator('.dc-close')).toBeVisible()
         const card = await rect(page, '.dc-card')

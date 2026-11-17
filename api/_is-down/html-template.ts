@@ -583,6 +583,7 @@ export function renderPage(
   const ogTitle = service
     ? `Is ${seo.displayName} Down? ${statusTitleLabel(ogStatus)} | AIWatch`
     : title
+  const outageActive = service ? ['down', 'degraded'].includes(assertableStatus(service)) : false
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -743,7 +744,7 @@ ${DEVICE_CHECK_CSS}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORES, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderDeviceCheck(resolveBeaconSvcId(slug, service))}
+${renderDeviceCheck(resolveBeaconSvcId(slug, service), outageActive)}
 ${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service), recoveryBaseline ?? undefined, fallbackGroups, estimateAccuracy ?? undefined)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
@@ -763,7 +764,7 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners(resolveBeaconSvcId(slug, service), service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
+${renderDelegatedListeners(resolveBeaconSvcId(slug, service), outageActive)}
 ${cookieBannerHtml()}
 </body>
 </html>`

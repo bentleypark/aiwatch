@@ -49,58 +49,69 @@ export function recordHistoryClick(
   }
 }
 
-/** Flagged bots excluded on both sides. Views are those of the pages that carry the link. */
-export interface HistoryClickCounts {
+/** Flagged bots excluded on both sides. Views are those the caller's query selects. */
+export interface ClickRateCounts {
   active: { clicks: number; views: number }
   clear: { clicks: number; views: number }
 }
+export type HistoryClickCounts = ClickRateCounts
 
-export function buildHistoryClickSql(dataset = V1_DATASET): string {
+/** A click index read against the is-down views — for any click point written as
+ *  `[svc, phase, agent, surface, …]` under its own `index1`. `viewsWhere` narrows the views to the
+ *  pages that carry the clicked element. */
+export function buildClickRateSql(clickIndex: string, dataset = V1_DATASET, viewsWhere = ''): string {
   return (
     `SELECT index1 AS kind, blob2 AS phase, SUM(_sample_interval) AS n ` +
     `FROM ${dataset} ` +
     `WHERE timestamp > NOW() - INTERVAL '1' DAY AND (` +
-    `(index1 = '${HISTORY_CLICK_INDEX}' AND blob3 != 'bot') OR ` +
-    `(index1 = '${ISDOWN_INDEX}' AND blob4 IN ('service', 'group') AND blob5 != 'bot')` +
+    `(index1 = '${clickIndex}' AND blob3 != 'bot') OR ` +
+    `(index1 = '${ISDOWN_INDEX}' AND blob4 IN ('service', 'group') AND blob5 != 'bot'${viewsWhere})` +
     `) ` +
     `GROUP BY index1, blob2 ` +
     `FORMAT JSON`
   )
 }
 
-export function parseHistoryClickResponse(json: unknown): HistoryClickCounts | null {
+export function parseClickRateResponse(json: unknown, clickIndex: string): ClickRateCounts | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data)) return null
-  const counts: HistoryClickCounts = { active: { clicks: 0, views: 0 }, clear: { clicks: 0, views: 0 } }
+  const counts: ClickRateCounts = { active: { clicks: 0, views: 0 }, clear: { clicks: 0, views: 0 } }
   for (const row of data) {
     const r = row as { kind?: unknown; phase?: unknown; n?: unknown }
     const parsed = Number(r.n)
     const n = Number.isFinite(parsed) ? parsed : 0
     const phase = r.phase === 'active' ? counts.active : counts.clear
-    if (r.kind === HISTORY_CLICK_INDEX) phase.clicks += n
+    if (r.kind === clickIndex) phase.clicks += n
     else if (r.kind === ISDOWN_INDEX) phase.views += n
   }
   return counts
 }
 
-export async function queryHistoryClicks(
+export async function queryClickRate(
+  clickIndex: string,
   accountId: string | undefined,
   token: string | undefined,
   fetchImpl: typeof fetch = fetch,
-): Promise<HistoryClickCounts | null> {
+  viewsWhere = '',
+): Promise<ClickRateCounts | null> {
   if (!accountId || !token) return null
   try {
     const res = await fetchImpl(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
-      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildHistoryClickSql() },
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildClickRateSql(clickIndex, V1_DATASET, viewsWhere) },
     )
     if (!res.ok) {
-      console.warn(`[wae] history-click SQL query failed: HTTP ${res.status}`)
+      console.warn(`[wae] ${clickIndex} SQL query failed: HTTP ${res.status}`)
       return null
     }
-    return parseHistoryClickResponse(await res.json())
+    return parseClickRateResponse(await res.json(), clickIndex)
   } catch (err) {
-    console.warn('[wae] history-click SQL query error:', err instanceof Error ? err.message : err)
+    console.warn(`[wae] ${clickIndex} SQL query error:`, err instanceof Error ? err.message : err)
     return null
   }
 }
+
+export const buildHistoryClickSql = (dataset = V1_DATASET): string => buildClickRateSql(HISTORY_CLICK_INDEX, dataset)
+export const parseHistoryClickResponse = (json: unknown): HistoryClickCounts | null => parseClickRateResponse(json, HISTORY_CLICK_INDEX)
+export const queryHistoryClicks = (accountId: string | undefined, token: string | undefined, fetchImpl: typeof fetch = fetch): Promise<HistoryClickCounts | null> =>
+  queryClickRate(HISTORY_CLICK_INDEX, accountId, token, fetchImpl)

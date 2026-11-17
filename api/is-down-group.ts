@@ -223,6 +223,7 @@ function renderGroupPage(
   maintenances: NonNullable<ServiceData['scheduledMaintenances']> = [],
 ): string {
   const headline = worstStatus(members)
+  const outageActive = headline === 'down' || headline === 'degraded'
   // #1193 — the member the audience beacon attributes a view to: the one carrying the headline
   // status, so the (active-flag, svcId) pair the WAE row stores cannot contradict itself. `headline`
   // is always a status some member holds, so the `??` is belt-and-braces, not the all-operational
@@ -619,7 +620,7 @@ ${referenceSection}${summarySection}
 ${monthlyReportSection}
 ${alertSection}
 ${extCtaSection}
-${renderDeviceCheckGroup(members)}
+${renderDeviceCheckGroup(members, outageActive)}
 ${renderScheduledMaintenance(maintenances, 'ongoing')}${renderScheduledMaintenance(maintenances, 'upcoming')}
 ${incidentSection}
 ${communityReportSection}
@@ -637,7 +638,7 @@ ${reportSection}
 // service that had no outage.
 // (No backticks in this comment: it sits inside a template literal — see #842-B.)
 // #1280 — 'group' is what makes beaconSvcId readable; see worker/src/outage-audience.ts.
-${audienceBeaconScript(beaconSvcId, headline === 'down' || headline === 'degraded', 'group')}
+${audienceBeaconScript(beaconSvcId, outageActive, 'group')}
 // #1243 — hold the BUTTON in a variable instead of reading e.currentTarget inside the async callback.
 // The DOM resets currentTarget to null once dispatch finishes, and the clipboard promise resolves
 // after that, so the old code threw a TypeError in .then(): the copy succeeded but the confirmation
@@ -723,7 +724,7 @@ document.addEventListener('click', function(e){
   var g = e.target.closest('[data-ga]')
   if (!g) return
   var d = g.dataset
-  ${historyClickBeacon(headline === 'down' || headline === 'degraded', 'group')}
+  ${historyClickBeacon(outageActive, 'group')}
   if (typeof gtag !== 'function') return
   var p = {}
   if (g.dataset.gaLoc) p.location = g.dataset.gaLoc

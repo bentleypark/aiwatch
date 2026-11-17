@@ -1249,6 +1249,18 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(buildDailySummary({ ...minimal, historyClicks: { active: { clicks: 0, views: 3 }, clear: { clicks: 2, views: 50 } } }))
       .toContain('📜 **30-day History Link** (24h): during outages 0 clicks / 3 views · clear 2 clicks / 50 views')
   })
+
+  it('#2009 — the Check connection line reaches the assembled summary, beside and not instead of the history line', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const out = buildDailySummary({
+      ...minimal,
+      historyClicks: { active: { clicks: 0, views: 3 }, clear: { clicks: 2, views: 50 } },
+      deviceChecks: { active: { clicks: 1, views: 3 }, clear: { clicks: 4, views: 50 } },
+    })
+    expect(out).toContain('🌐 **Check Connection** (24h): during outages 1 checks / 3 views · clear 4 checks / 50 views')
+    expect(out).toContain('📜 **30-day History Link** (24h)')
+    expect(buildDailySummary({ ...minimal })).not.toContain('Check Connection')
+  })
 })
 
 describe('formatAudienceScreenRow (#1280 — which screen the views landed on)', () => {

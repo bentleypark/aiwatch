@@ -199,6 +199,21 @@ describe('is-down-group.ts', () => {
       expect(res.headers.get('Content-Security-Policy')).toContain(`'sha256-${await sha256Base64(script)}'`)
     })
 
+    it('tells the counter whether the family page was rendered during an outage', async () => {
+      // The checked member (Claude API) stays operational: the flag is the page's, not the member's.
+      const withClaudeAi = (status: string) => statusResponse([
+        { id: 'claude', name: 'Claude API', status: 'operational' },
+        { id: 'claudeai', name: 'claude.ai', status },
+        { id: 'claudecode', name: 'Claude Code', status: 'operational' },
+      ] as MockService[])
+      for (const [status, active] of [['operational', 'false'], ['degraded', 'true'], ['down', 'true']] as const) {
+        fetchMock = spyFetchAsWorker().mockResolvedValueOnce(withClaudeAi(status))
+        const html = await (await handler(makeReq('claude'))).text()
+        expect(html.match(/<section class="device-check"[^>]*>/)![0], status).toContain(`data-active="${active}"`)
+        fetchMock.mockRestore()
+      }
+    })
+
     it('a click on the block reaches the check from the group page\'s own scripts', async () => {
       fetchMock = spyFetchAsWorker().mockResolvedValueOnce(claude())
       const html = await (await handler(makeReq('claude'))).text()

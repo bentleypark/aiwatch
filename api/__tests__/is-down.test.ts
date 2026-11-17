@@ -210,6 +210,18 @@ describe('is-down.ts cache-header divergence (#378)', () => {
       expect(connectSrc(res)).not.toContain('replicate.com')
     })
 
+    it('tells the counter whether the page was rendered during an outage', async () => {
+      for (const [status, active] of [['operational', 'false'], ['degraded', 'true'], ['down', 'true']] as const) {
+        const body = await workerFor('claude').json()
+        body.services[0].status = status
+        fetchMock.mockImplementation(async (input) => String(input).includes('/api/report-feed')
+          ? new Response(JSON.stringify({ reports: [] }), { status: 200 })
+          : new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        const html = await (await handler(makeReq('claude-api'))).text()
+        expect(html.match(/<section class="device-check"[^>]*>/)![0], status).toContain(`data-active="${active}"`)
+      }
+    })
+
     it('the click handler is hashed into the same response\'s script-src', async () => {
       fetchMock.mockResolvedValueOnce(workerFor('claude'))
       const res = await handler(makeReq('claude-api'))

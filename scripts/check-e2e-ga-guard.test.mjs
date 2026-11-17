@@ -24,14 +24,16 @@ test('GA_HIT_RE does NOT match gtag.js — consent.spec needs the loader to reac
   assert.ok(!GA_HIT_RE.test('https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK'))
 })
 
-test('AUDIENCE_BEACON_RE matches the production beacon endpoint (#1436)', () => {
+test('AUDIENCE_BEACON_RE matches the production beacon endpoints (#1436, #2009)', () => {
   assert.ok(AUDIENCE_BEACON_RE.test('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview'))
+  assert.ok(AUDIENCE_BEACON_RE.test('https://aiwatch-worker.p2c2kbf.workers.dev/api/device-check'))
 })
 
 test('AUDIENCE_BEACON_RE does NOT match other worker or Edge API routes the pages need', () => {
   for (const url of [
     'https://aiwatch-worker.p2c2kbf.workers.dev/api/status',
     'https://aiwatch-worker.p2c2kbf.workers.dev/api/pageviews',
+    'https://aiwatch-worker.p2c2kbf.workers.dev/api/device-checks',
     'https://aiwatch-worker.p2c2kbf.workers.dev/api/referral',
     'http://localhost:3333/api/is-down-group?family=claude',
   ]) {

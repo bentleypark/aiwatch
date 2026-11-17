@@ -1,24 +1,11 @@
 // #2009 — the "Check connection" button on the Edge is-down pages: one click makes one GET from the
 // visitor's browser to the service's existing probe URL and prints the HTTP status + elapsed time.
 // No verdict is drawn.
-//
-// Readable = the provider answers a cross-origin GET with CORS headers (measured 2026-11-16 from a
-// third-party origin, `mode: 'cors'`, no credentials — see #2009). READABLE ∪ UNREADABLE must equal
-// PROBE_TARGETS (pinned in device-check.test.ts), so a new probe target forces a decision here.
 
 import { PROBE_TARGETS } from '../../worker/src/probe'
+import { DEVICE_CHECK_READABLE, DEVICE_CHECK_UNREADABLE } from '../../worker/src/device-check-readable'
 
-export const DEVICE_CHECK_READABLE: Readonly<Record<string, { header?: string }>> = {
-  claude: { header: 'anthropic-dangerous-direct-browser-access:true' },
-  openai: {}, gemini: {}, mistral: {}, cohere: {}, groq: {}, together: {}, fireworks: {}, cerebras: {},
-  perplexity: {}, huggingface: {}, fal: {}, elevenlabs: {}, xai: {}, deepseek: {}, kimi: {}, openrouter: {},
-  stability: {}, assemblyai: {}, fishaudio: {}, speechmatics: {}, voyageai: {}, jina: {}, twelvelabs: {},
-  langsmith: {}, langfuse: {}, turbopuffer: {}, bedrock: {},
-}
-
-export const DEVICE_CHECK_UNREADABLE: readonly string[] = [
-  'replicate', 'bfl', 'deepgram', 'pinecone', 'runway', 'luma', 'helicone', 'cursor', 'characterai',
-]
+export { DEVICE_CHECK_READABLE, DEVICE_CHECK_UNREADABLE }
 
 export interface DeviceCheckTarget { url: string; host: string; origin: string; header?: string }
 
@@ -83,6 +70,7 @@ function runDeviceCheck(btn) {
     out.textContent = deviceCheckLine(o);
     var note = box.querySelector('[data-device-note]');
     if (note) note.textContent = box.getAttribute('data-note') || '';
+    try { fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/device-check', { method: 'POST', keepalive: true, body: JSON.stringify({ svc: box.getAttribute('data-svc') || '', active: box.getAttribute('data-active') === 'true', surface: box.getAttribute('data-surface') || '', outcome: deviceCheckClass(o) }) }).catch(function () {}); } catch (e3) {}
     if (typeof gtag === 'function') gtag('event', 'device_check_result', { service_id: box.getAttribute('data-svc') || '', outcome: deviceCheckClass(o) });
   }
   fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store', redirect: 'follow', referrerPolicy: 'no-referrer', headers: headers, signal: ctl.signal }).then(
@@ -121,15 +109,16 @@ export const DEVICE_CHECK_CSS = `.device-check{position:fixed;right:20px;bottom:
 .dc-close{position:absolute;top:6px;right:8px;width:24px;height:24px;padding:0;border:0;background:none;color:#8b949e;font-size:18px;line-height:1;cursor:pointer}
 [data-device-out]:empty ~ .dc-note,[data-device-out]:empty ~ .dc-close{display:none}`
 
-type Surface = 'is_down_page' | 'is_down_group_page'
+type Surface = 'service' | 'group'
 
 const NOTE_TAIL = 'The request goes straight from your browser, not through AIWatch.'
 
-function renderBlock(svcId: string, t: DeviceCheckTarget, note: string, surface: Surface): string {
+function renderBlock(svcId: string, t: DeviceCheckTarget, note: string, surface: Surface, active: boolean): string {
   const hdr = t.header ? ` data-hdr="${escAttr(t.header)}"` : ''
   const svc = escAttr(svcId)
-  return `<section class="device-check" data-device-check data-svc="${svc}" data-url="${escAttr(t.url)}" data-note="${escAttr(note)}"${hdr}>
-<button type="button" class="dc-pill" data-action="device-check" data-ga="click_device_check" data-ga-loc="${surface}" data-ga-svc="${svc}"><span aria-hidden="true">🌐</span> <span data-device-label>Check connection</span></button>
+  const gaLoc = surface === 'service' ? 'is_down_page' : 'is_down_group_page'
+  return `<section class="device-check" data-device-check data-svc="${svc}" data-url="${escAttr(t.url)}" data-note="${escAttr(note)}" data-active="${active}" data-surface="${surface}"${hdr}>
+<button type="button" class="dc-pill" data-action="device-check" data-ga="click_device_check" data-ga-loc="${gaLoc}" data-ga-svc="${svc}"><span aria-hidden="true">🌐</span> <span data-device-label>Check connection</span></button>
 <div class="dc-card">
 <p data-device-out aria-live="polite"></p>
 <p class="dc-note" data-device-note></p>
@@ -143,11 +132,12 @@ export const DEVICE_CHECK_JS = `${DEVICE_CHECK_CLIENT_JS}\n${DEVICE_CHECK_LISTEN
 
 const SCRIPT = `<script>${DEVICE_CHECK_JS}\n</script>`
 
-/** The button block for a service page, or '' when its provider is not readable from a browser. */
-export function renderDeviceCheck(serviceId: string): string {
+/** The button block for a service page, or '' when its provider is not readable from a browser.
+ *  `active` is the page's SSR-time outage status, as the page's other consent-free beacons carry it. */
+export function renderDeviceCheck(serviceId: string, active: boolean): string {
   const t = deviceCheckTarget(serviceId)
   if (!t) return ''
-  return `${renderBlock(serviceId, t, NOTE_TAIL, 'is_down_page')}\n${SCRIPT}`
+  return `${renderBlock(serviceId, t, NOTE_TAIL, 'service', active)}\n${SCRIPT}`
 }
 
 export interface DeviceCheckGroupEntry { svcId: string; name: string; target: DeviceCheckTarget }
@@ -167,9 +157,9 @@ export function deviceCheckGroupConnectSrc(members: ReadonlyArray<{ id: string; 
 
 /** One block per testable member of a family page; '' when none is testable. Markup only — the
  *  page adds DEVICE_CHECK_JS to its own script. */
-export function renderDeviceCheckGroup(members: ReadonlyArray<{ id: string; name: string }>): string {
+export function renderDeviceCheckGroup(members: ReadonlyArray<{ id: string; name: string }>, active: boolean): string {
   return deviceCheckGroupTargets(members).map((e) => {
     const note = `${e.target.host} is the address of ${e.name} (not a website). ${NOTE_TAIL}`
-    return renderBlock(e.svcId, e.target, note, 'is_down_group_page')
+    return renderBlock(e.svcId, e.target, note, 'group', active)
   }).join('\n')
 }
