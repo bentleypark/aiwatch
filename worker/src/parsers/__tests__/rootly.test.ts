@@ -466,7 +466,7 @@ describe('the two status vocabularies stay in step (#1476)', () => {
 
   it('refuses what the scraper emits for an icon colour it cannot map', async () => {
     const { readV3ComponentStatus } = await import('../../../../scripts/scrape-mistral-status.mjs')
-    expect(mapRootlyComponentStatus(readV3ComponentStatus('w-5 text-tangerine-11'))).toBeNull()
+    expect(mapRootlyComponentStatus(readV3ComponentStatus('w-5 text-dove-grey-6'))).toBeNull()
   })
 })
 

@@ -357,10 +357,10 @@ test('the icon colour maps to a status word the Worker accepts; any other colour
   assert.equal(readV3ComponentStatus('w-5 text-pothos-12'), 'Operational')
   assert.equal(readV3ComponentStatus('w-5 text-amber-11'), 'Degraded')
   assert.equal(readV3ComponentStatus('w-5 text-red-v2-12'), 'Major Outage')
-  assert.equal(readV3ComponentStatus('w-5 text-tangerine-11'), 'Unknown')
+  assert.equal(readV3ComponentStatus('w-5 h-5 flex items-center justify-center shrink-0 text-tangerine-9'), 'Partial Outage')
   assert.equal(readV3ComponentStatus('w-5 text-dove-grey-6'), 'Unknown')
   assert.equal(readV3ComponentStatus(undefined), 'Unknown')
-  assert.deepEqual(COMPONENT_STATES_WORDS, ['Operational', 'Degraded', 'Major Outage'])
+  assert.deepEqual(COMPONENT_STATES_WORDS, ['Operational', 'Degraded', 'Partial Outage', 'Major Outage'])
 })
 
 test('a day tooltip reads as its date and minutes, and nothing else is guessed', () => {

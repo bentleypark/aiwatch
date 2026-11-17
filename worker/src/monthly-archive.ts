@@ -1156,7 +1156,7 @@ export async function accumulateIncidentsOnlyIfChanged(
   try {
     tombstones = diffPrunedIncidents(existing, updated, now.toISOString())
     if (tombstones.length > 0) {
-      await appendWithdrawn(kv, tombstones)
+      await appendWithdrawn(kv, tombstones, now.getTime())
       // #1106 Part 5 — the tombstone above is 6d; this is the durable record that the withdrawal
       // happened at all. Written AFTER the roster so a KV failure here can never cost the notice
       // itself, and unconditionally on the roster's own outcome: a withdrawal that failed to notify
