@@ -3,7 +3,7 @@
 // both with the same `crossEventKey`. An incident joining a row is aliased under its own raw id too, so the
 // archive merge — which looks rows up by raw id — finds the row instead of adding a second one.
 import { mergeArchiveIntoMap } from './archiveMerge'
-import { mergeReferenceRows } from './referenceIncidents'
+import { mergeReferenceRows, toReferenceRow } from './referenceIncidents'
 
 /** A live incident as a log row: composite id, display status. */
 export function toLiveRow(inc, svc) {
@@ -71,4 +71,9 @@ export function unfilteredIncidentRows(services, archives, archiveMonths, toRefe
   }
   mergeReferenceRows(incMap, services, toReferenceRow)
   return [...new Set(incMap.values())]
+}
+
+/** #2027 — the unresolved live and reference rows, merged as the Incidents page merges them; the sidebar badge. */
+export function unresolvedIncidentCount(services) {
+  return unfilteredIncidentRows(services, {}, [], toReferenceRow).filter((r) => r.status !== 'resolved').length
 }
