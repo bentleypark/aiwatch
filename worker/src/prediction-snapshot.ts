@@ -83,6 +83,14 @@ const minutesBetween = (laterMs: number, earlierMs: number): number | null => {
 
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim()
 
+export function firstUpdate(timeline: readonly { text: string | null }[]): { index: number; text: string } | undefined {
+  for (let index = 0; index < timeline.length; index++) {
+    const text = oneLine(sanitize(timeline[index].text ?? '', FIRST_UPDATE_MAX))
+    if (text.length > 0) return { index, text }
+  }
+  return undefined
+}
+
 export function buildPredictionSnapshot(
   inc: SnapshotIncident,
   result: SnapshotResult,
@@ -90,7 +98,7 @@ export function buildPredictionSnapshot(
 ): PredictionSnapshot {
   const timeline = inc.timeline ?? []
   const last = timeline.at(-1)
-  const firstText = timeline.map(t => oneLine(sanitize(t.text ?? '', FIRST_UPDATE_MAX))).find(t => t.length > 0)
+  const firstText = firstUpdate(timeline)?.text
   const scope = (result.affectedScope ?? []).slice(0, 8).map(s => sanitize(s, 60)).filter(s => s.length > 0)
   const hours = result.estimatedRecoveryHours
   const estimateHours = typeof hours === 'number' && hours > 0 ? hours : null
