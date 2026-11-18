@@ -6,12 +6,13 @@
 // scripts/check-e2e-ga-guard.test.mjs rather than only exercised end-to-end.
 
 // Hits land on `/g/collect` (and `/mp/collect`), served from the regional variants the CSP allows
-// (`www.` / `region1.` google-analytics.com) or from analytics.google.com.
+// (`www.` / `region1.` google-analytics.com) or from analytics.google.com, plus the `www.google.com/g/collect`
+// beacon gtag.js also sends, which the CSP allows since #2026.
 //
 // googletagmanager.com is deliberately NOT matched: gtag.js is a static script that carries no
 // measurement, and tests/consent.spec.js needs it to load — the `_ga` cookie that spec asserts is
 // written client-side by gtag.js, not by a collect response.
-export const GA_HIT_RE = /(google-analytics\.com|analytics\.google\.com)\//
+export const GA_HIT_RE = /(google-analytics\.com|analytics\.google\.com)\/|^https:\/\/www\.google\.com\/g\/collect/
 
 // #1436 — the is-down audience beacon (`api/_shared/audience-beacon.ts`) posts to the PRODUCTION
 // worker from any host, including the Vercel Preview the Edge E2E job runs against, whose origin the

@@ -7,6 +7,8 @@
 // static inline <script> blocks) and Phase 3 (flip to enforcing). Report-Only breaks nothing;
 // this only collects. Always 204s so the browser's reporting pipeline stays quiet.
 
+import { workerApiFor } from './_shared/worker-api'
+
 export const config = { runtime: 'edge' }
 
 // Normalize the two violation-report wire formats into a flat list of records:
@@ -38,20 +40,83 @@ export function parseCspReports(body: string): Array<Record<string, unknown>> {
 // One-line summary of a report, tolerant of both the kebab-case (report-uri) and camelCase
 // (report-to) field names. Exported for the test.
 export function summarizeCspReport(r: Record<string, unknown>): string {
-  const pick = (...keys: string[]) => {
-    for (const k of keys) {
-      const v = r[k]
-      if (v !== undefined && v !== null && v !== '') return String(v)
-    }
-    return '?'
-  }
-  const directive = pick('violated-directive', 'effectiveDirective', 'violatedDirective', 'effective-directive')
-  const blocked = pick('blocked-uri', 'blockedURL', 'blockedUri')
-  const doc = pick('document-uri', 'documentURL', 'documentUri')
-  const file = pick('source-file', 'sourceFile')
-  const line = pick('line-number', 'lineNumber')
+  const pick = (keys: readonly string[]) => reportField(r, keys) || '?'
+  const directive = pick(DIRECTIVE_KEYS)
+  const blocked = pick(BLOCKED_KEYS)
+  const doc = pick(DOCUMENT_KEYS)
+  const file = pick(['source-file', 'sourceFile'])
+  const line = pick(['line-number', 'lineNumber'])
   const where = file !== '?' ? ` src=${file}:${line}` : ''
   return `directive=${directive} blocked=${blocked} doc=${doc}${where}`
+}
+
+const DIRECTIVE_KEYS = ['violated-directive', 'effectiveDirective', 'violatedDirective', 'effective-directive'] as const
+const BLOCKED_KEYS = ['blocked-uri', 'blockedURL', 'blockedUri'] as const
+const DOCUMENT_KEYS = ['document-uri', 'documentURL', 'documentUri'] as const
+
+function reportField(r: Record<string, unknown>, keys: readonly string[]): string {
+  for (const k of keys) {
+    const v = r[k]
+    if (v !== undefined && v !== null && v !== '') return String(v)
+  }
+  return ''
+}
+
+/** #2026 — the fields the worker keeps (api/csp-report.ts logs vanish within the log window). */
+export function toViolationRecord(r: Record<string, unknown>): { directive: string; blocked: string; page: string } {
+  return {
+    directive: reportField(r, DIRECTIVE_KEYS).split(' ')[0],
+    blocked: reportField(r, BLOCKED_KEYS),
+    page: reportField(r, DOCUMENT_KEYS),
+  }
+}
+
+export const MAX_FORWARDED = 5
+
+/** One record per distinct directive + blocked URL, at most MAX_FORWARDED per POST. */
+export function forwardableRecords(reports: Array<Record<string, unknown>>): Array<{ directive: string; blocked: string; page: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ directive: string; blocked: string; page: string }> = []
+  for (const r of reports) {
+    const rec = toViolationRecord(r)
+    const key = `${rec.directive} ${rec.blocked}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(rec)
+    if (out.length === MAX_FORWARDED) break
+  }
+  return out
+}
+
+/** Production and `vercel dev` only: a Preview's reports would land in the production count. */
+export function forwardsFrom(reqUrl: string): boolean {
+  const { hostname } = new URL(reqUrl)
+  return hostname === 'ai-watch.dev' || hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+/** Returns how many forwards the worker did not accept, and logs that count. */
+export async function forwardCspReports(reports: Array<Record<string, unknown>>, req: Request, fetchImpl: typeof fetch = fetch): Promise<number> {
+  if (!forwardsFrom(req.url)) return 0
+  const target = `${workerApiFor(req.url)}/api/csp-violation`
+  const headerOrigin = req.headers.get('Origin')
+  const origin = headerOrigin && headerOrigin !== 'null' ? headerOrigin : new URL(req.url).origin
+  const results = await Promise.allSettled(
+    forwardableRecords(reports).map((rec) =>
+      fetchImpl(target, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: origin },
+        body: JSON.stringify(rec),
+        signal: AbortSignal.timeout(3000),
+      }),
+    ),
+  )
+  const failed = results.filter((r) => r.status === 'rejected' || !r.value.ok)
+  if (failed.length > 0) {
+    const first = failed[0]
+    const why = first.status === 'rejected' ? String(first.reason) : `HTTP ${first.value.status}`
+    console.warn(`[csp-report] ${failed.length}/${results.length} forwards to the worker failed (${why})`)
+  }
+  return failed.length
 }
 
 export default async function handler(req: Request) {
@@ -65,6 +130,7 @@ export default async function handler(req: Request) {
       console.log(`[csp-report] unparsed (${body.slice(0, 200)})`)
     } else {
       for (const r of reports) console.log(`[csp-report] ${summarizeCspReport(r)}`)
+      await forwardCspReports(reports, req)
     }
   } catch (err) {
     console.error('[csp-report] handler error:', err instanceof Error ? err.message : err)

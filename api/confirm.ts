@@ -15,25 +15,9 @@
 // design tokens (src/index.css dark theme) + the AI<green>Watch</green> wordmark with the favicon so
 // it matches the rest of AIWatch.
 
+import { workerApiFor } from './_shared/worker-api'
+
 export const config = { runtime: 'edge' }
-
-const PROD_WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
-const LOCAL_WORKER_API = 'http://localhost:8788'
-
-/** The worker the Activate button POSTs to, chosen by the host of the incoming request (`req.url`).
- *  When this page is requested via a localhost host (i.e. served by `vercel dev`), target the local
- *  worker so the subscribe → confirm click-through can run end-to-end. For this to actually work the
- *  worker must ALSO emit a localhost confirm link — set `CONFIRM_BASE_URL=http://localhost:3333` on
- *  the worker (worker/src/index.ts) so the link points back to this page; this function alone only
- *  controls the POST target, not the link the worker posts to Discord. Harmless in prod — the
- *  deployed host is never localhost, so production always POSTs to the deployed worker. (#486 PR2) */
-function workerApiFor(reqUrl: string): string {
-  try {
-    const { hostname } = new URL(reqUrl)
-    if (hostname === 'localhost' || hostname === '127.0.0.1') return LOCAL_WORKER_API
-  } catch { /* fall through to prod */ }
-  return PROD_WORKER_API
-}
 
 // h = sha256 hex (64), c = 6-digit code. Validate shape before reflecting into HTML/JS to avoid
 // injection — anything malformed renders the generic "invalid link" state without a button.
@@ -98,6 +82,8 @@ export default async function handler(req: Request): Promise<Response> {
     // h/c (safe: both passed strict regex) and calls the worker's confirm endpoint on click.
     const hJs = JSON.stringify(h)
     const cJs = JSON.stringify(c)
+    // A local click-through also needs `CONFIRM_BASE_URL=http://localhost:3333` on the worker, so the
+    // confirm link it posts to Discord points back at `vercel dev` (#486 PR2).
     const workerApi = workerApiFor(req.url)
     return new Response(page(`
       <h1>Confirm AIWatch alerts</h1>
