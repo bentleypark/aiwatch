@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { findGaGuardViolations, stripComments, stripNonCode, readSpecs, TESTS_DIR } from './check-e2e-ga-guard.mjs'
-import { GA_HIT_RE, AUDIENCE_BEACON_RE } from '../tests/ga-hosts.js'
+import { GA_HIT_RE, AUDIENCE_BEACON_RE, CLARITY_RE } from '../tests/ga-hosts.js'
 
 const spec = (source) => [{ file: 'x.spec.js', source }]
 
@@ -185,4 +185,16 @@ test('every spec Playwright runs is covered by the GA4 block', () => {
     [],
     `specs can reach GA4:\n${violations.map((v) => `  tests/${v.file} — ${v.reason}`).join('\n')}`,
   )
+})
+
+test('CLARITY_RE matches the Clarity loader, script and upload hosts, and nothing else (#2024)', () => {
+  for (const url of [
+    'https://www.clarity.ms/tag/abc123xyz',
+    'https://scripts.clarity.ms/0.8.79-beta/clarity.js',
+    'https://i.clarity.ms/collect',
+    'https://f.clarity.ms/collect',
+  ]) assert.ok(CLARITY_RE.test(url), `must block ${url}`)
+  for (const url of ['https://ai-watch.dev/clarity.ms/x', 'https://evilclarity.ms/x']) {
+    assert.ok(!CLARITY_RE.test(url), `must not block ${url}`)
+  }
 })

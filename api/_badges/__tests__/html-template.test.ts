@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { renderBadgesPage, badgeMarkdownFor } from '../html-template'
 import { SLUG_TO_SERVICE } from '../../_is-down/slug-map'
+import { COOKIE_BANNER_HTML } from '../../_shared/cookie-banner'
+
+const COOKIE_BANNER_MARKUP = COOKIE_BANNER_HTML.split('\n<script>')[0]
 
 describe('badgeMarkdownFor (#805) — links to the crawlable is-down page', () => {
   it('builds markdown with the worker service id image + is-down link (slug == id)', () => {
@@ -58,7 +61,8 @@ describe('renderBadgesPage', () => {
   })
 
   it('contains no non-crawlable hash-route badge links', () => {
-    expect(html).not.toContain('ai-watch.dev/#')
+    expect(html).toContain(COOKIE_BANNER_MARKUP)
+    expect(html.replace(COOKIE_BANNER_MARKUP, '')).not.toContain('ai-watch.dev/#')
   })
 
   it('wires the copy_badge GA4 event from the badges page', () => {

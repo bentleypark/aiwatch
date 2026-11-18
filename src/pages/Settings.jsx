@@ -605,6 +605,7 @@ export default function Settings({ focus } = {}) {
           <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.discord.desc')}</div>
           <input
             type="text"
+            data-clarity-mask="True"
             value={discordUrl}
             onChange={(e) => { setDiscordUrl(e.target.value); if (subAction === 'error') setSubAction(null) }}
             placeholder="https://discord.com/api/webhooks/..."

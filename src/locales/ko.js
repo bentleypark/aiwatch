@@ -437,7 +437,8 @@ const ko = {
 
   // Cookie Banner
   'cookie.title': '쿠키 사용 안내',
-  'cookie.description': 'AIWatch는 서비스 개선을 위해 Google Analytics 쿠키를 사용합니다. 방문 페이지, 체류 시간 등 익명 사용 통계만 수집하며, 개인 식별 정보는 수집하지 않습니다. 필수 쿠키(테마, 언어 설정)는 분석과 무관하게 항상 사용됩니다.',
+  'cookie.description': 'AIWatch는 서비스 개선을 위해 Google Analytics와 Microsoft Clarity로 사이트 이용 방식을 분석합니다. 개인 식별 정보는 수집하지 않습니다. 필수 쿠키(테마, 언어 설정)는 분석과 무관하게 항상 사용됩니다.',
+  'cookie.privacyLink': '수집 항목은 개인정보 처리방침에서 확인하세요',
   'cookie.accept': '모두 동의',
   'cookie.essential': '필수만 사용',
 

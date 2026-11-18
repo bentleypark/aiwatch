@@ -11,6 +11,7 @@
 // delegated listeners, so this page stays off the Phase-2 inline-handler refactor list.
 
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { clarityInitScript } from '../_shared/clarity'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
 
@@ -25,6 +26,7 @@ export function renderMethodologyPage(nonce?: string): string {
 <title>How AIWatch Works — Methodology | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
+${clarityInitScript(nonce)}
 <meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 50 services, polled every 5 min, UTC.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">
@@ -536,7 +538,7 @@ ${consentInitScript(nonce)}
     </div>
     <div class="indep-card">
       <div class="ic-title"><span class="ic-icon">🔒</span> <span data-i18n="s7.privacy.title">프라이버시</span></div>
-      <div class="ic-body" data-i18n="s7.privacy.body">익명 사용 통계(GA4)만, 동의 시에만 수집합니다. 동의 없이는 분석·광고 쿠키가 저장되지 않습니다.</div>
+      <div class="ic-body" data-i18n="s7.privacy.body">Microsoft Clarity 세션 리플레이는 동의 시에만 동작합니다. 동의 없이는 분석·광고 쿠키가 저장되지 않습니다.</div>
     </div>
   </div>
   <p data-i18n="s7.close">이 중립성이 AIWatch 데이터를 의사결정에 쓸 수 있게 하는 핵심입니다 — AIWatch는 측정한 것만 말하고, 측정할 수 없는 것은 분명히 밝힙니다.</p>
@@ -652,7 +654,7 @@ const i18n = {
     's7.free.title': '무료 · 무가입', 's7.free.body': '공개 대시보드는 완전 무료이며, 계정이나 로그인 없이 누구나 이용할 수 있습니다. 개인정보(PII)는 수집하지 않습니다.',
     's7.open.title': '오픈소스', 's7.open.body': '상태 결정, 점수 산정, 수집 로직 전부가 AGPL-3.0으로 공개되어 있습니다. 방법론을 직접 검증할 수 있습니다.',
     's7.merit.title': '성과 기반', 's7.merit.body': 'Score와 Fallback 추천은 객관적으로 측정된 신뢰도에만 근거합니다. 순위나 추천은 비용으로 살 수 없습니다.',
-    's7.privacy.title': '프라이버시', 's7.privacy.body': '익명 사용 통계(GA4)만, 동의 시에만 수집합니다. 동의 없이는 분석·광고 쿠키가 저장되지 않습니다.',
+    's7.privacy.title': '프라이버시', 's7.privacy.body': 'Microsoft Clarity 세션 리플레이는 동의 시에만 동작합니다. 동의 없이는 분석·광고 쿠키가 저장되지 않습니다.',
     's7.close': '이 중립성이 AIWatch 데이터를 의사결정에 쓸 수 있게 하는 핵심입니다 — AIWatch는 측정한 것만 말하고, 측정할 수 없는 것은 분명히 밝힙니다.',
     'footer.dashboard': '라이브 대시보드', 'footer.reports': '월간 리포트', 'footer.github': 'GitHub (오픈소스)', 'footer.rss': 'RSS'
   },
@@ -748,7 +750,7 @@ const i18n = {
     's7.free.title': 'Free · No signup', 's7.free.body': 'The public dashboard is completely free and open to anyone — no account, no login. We collect no personally identifiable information (PII).',
     's7.open.title': 'Open source', 's7.open.body': 'Status determination, scoring, and collection logic are all published under AGPL-3.0. You can verify the methodology yourself.',
     's7.merit.title': 'Merit-based', 's7.merit.body': 'The Score and Fallback recommendations are based only on measured reliability. Rank and recommendations cannot be bought.',
-    's7.privacy.title': 'Privacy', 's7.privacy.body': 'Only anonymous usage statistics (GA4), and only with consent. Without consent, no analytics or ad cookies are stored.',
+    's7.privacy.title': 'Privacy', 's7.privacy.body': 'Microsoft Clarity session replay runs only with consent. Without consent, no analytics or ad cookies are stored.',
     's7.close': 'This neutrality is what makes AIWatch data usable for decisions — we say only what we measure, and are explicit about what we can\\\'t.',
     'footer.dashboard': 'Live dashboard', 'footer.reports': 'Monthly reports', 'footer.github': 'GitHub (open source)', 'footer.rss': 'RSS'
   }

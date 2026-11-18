@@ -2,6 +2,8 @@
 // or when user has not consented to cookies.
 // Usage: import { trackEvent, trackPageView, initGA, hasConsent, setConsent } from '../utils/analytics'
 
+import { initClarity, clearClarityCookies } from './clarity'
+
 const GA_ID = import.meta.env.VITE_GA4_ID || ''
 const IS_ENABLED = GA_ID.startsWith('G-')
 const CONSENT_KEY = 'aiwatch-cookie-consent'
@@ -50,6 +52,7 @@ export function setConsent(granted) {
   if (granted) {
     if (!stored) return false
     initGA()
+    initClarity('granted')
     return true
   }
   // Revoke: disable GA and remove cookies
@@ -62,6 +65,7 @@ export function setConsent(granted) {
     })
   }
   clearAnalyticsCookies()
+  clearClarityCookies()
   return true
 }
 
@@ -71,6 +75,7 @@ export function setConsent(granted) {
 // banner flow), purge them on this load. Mirrors the Edge SSR / Jekyll inline behavior
 // so the Privacy Policy's documented "manual revoke" path actually works on the SPA.
 export function initConsentDefault() {
+  initClarity(hasConsent())
   if (!IS_ENABLED) return
   window.dataLayer = window.dataLayer || []
   window.gtag = function () { window.dataLayer.push(arguments) }

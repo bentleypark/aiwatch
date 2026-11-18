@@ -5,6 +5,10 @@ import { ALL_SERVICE_IDS } from './constants'
 
 export const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'ranking', 'statusline']
 
+// #2024: `#privacy` / `#terms` open the legal modal over the Overview — the deep link the Edge and
+// reports cookie banners use, since the Privacy Policy has no page of its own.
+export const LEGAL_MODALS = ['privacy', 'terms']
+
 // #546: a `?focus=<section>` suffix on a page hash (e.g. #settings?focus=alerts from the
 // Is-X-Down "Notify Me When Fixed" CTA) deep-links to a section so the outage visitor isn't
 // dropped at the page top. The page id itself is still split off before this, so routing is unaffected.
@@ -38,6 +42,10 @@ export function hashToPage(hash) {
   if (id === 'about-score') {
     window.location.replace('/methodology#score')
     return { name: 'overview' }
+  }
+  if (LEGAL_MODALS.includes(id)) {
+    window.history.replaceState(null, '', window.location.pathname)
+    return { name: 'overview', modal: id }
   }
   if (PAGE_NAMES.includes(id)) {
     const page = { name: id }

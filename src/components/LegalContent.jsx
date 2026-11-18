@@ -13,7 +13,7 @@ export function PrivacyContent() {
   const { lang } = useLang()
   if (lang === 'en') return (
     <div>
-      <p style={dateStyle}>Last updated: October 2026</p>
+      <p style={dateStyle}>Last updated: November 2026</p>
       <h3 style={headingStyle}>1. Information We Collect</h3>
       <p style={paraStyle}>AIWatch uses Google Analytics 4 (GA4) to collect the following information for service improvement.<br /><br />
         · Page visit history and session duration<br />
@@ -21,6 +21,7 @@ export function PrivacyContent() {
         · Device type, browser, and operating system<br />
         · Country/region (with IP anonymization)<br /><br />
         We do not collect personally identifiable information such as names or email addresses. Without analytics consent, GA4 operates in cookieless mode under Google Consent Mode v2 — only aggregate, anonymized pings flow, with no client identifier stored.<br /><br />
+        <strong>Session replay (only with analytics consent)</strong> — if you choose Accept All, AIWatch also loads Microsoft Clarity, which records how pages are used (page views, scrolling, clicks and mouse movement) so we can see where the dashboard and "Is X down?" pages are hard to use. Clarity hides what you type into input boxes and dropdowns, and AIWatch additionally hides the Discord webhook field. Clarity stores the _clck and _clsk cookies on ai-watch.dev, and Microsoft sets its own cookies on clarity.ms (such as CLID, MUID and SM). Microsoft describes MUID as used "for advertising, site analytics, and other operational purposes"; AIWatch blocks Clarity's connection to Bing (c.bing.com) and does not use these cookies for advertising. AIWatch cannot remove cookies set on clarity.ms; you can delete them in your browser's settings. Clarity is never loaded before or without your consent.<br /><br />
         To detect slow loading, anonymous performance timings are recorded with the visitor's country and the Cloudflare data center that served the request. No IP address is stored. Each batch of timings carries a random identifier generated when the page loads and is recorded with them, so slow loads can be grouped by visit. The identifier is kept only in the page's memory, never written to your device, and a reload creates a new one.</p>
       <h3 style={headingStyle}>2. Cookies and Local Storage</h3>
       <p style={paraStyle}>AIWatch uses the following types of browser storage:<br /><br />
@@ -36,14 +37,15 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>3. Cookie Banner</h3>
       <p style={paraStyle}>On your first visit to any AIWatch page, a cookie banner appears asking for analytics consent (Accept All / Essential Only). Your choice is stored in <code>localStorage.aiwatch-cookie-consent</code> and reused across all subsequent visits to any AIWatch page. The banner does not appear again unless you clear browser storage. Both choices are honored identically across the dashboard, "Is X down?" SEO pages, and monthly reports.</p>
       <h3 style={headingStyle}>4. Advertising</h3>
-      <p style={paraStyle}>AIWatch does not display advertisements. The Google Consent Mode v2 signals <code>ad_storage</code>, <code>ad_user_data</code>, and <code>ad_personalization</code> are set to "denied" by default and remain "denied" even after you accept analytics consent — only <code>analytics_storage</code> is upgraded. No advertising profile is built from your visits.</p>
+      <p style={paraStyle}>AIWatch does not display advertisements. The Google Consent Mode v2 signals <code>ad_storage</code>, <code>ad_user_data</code>, and <code>ad_personalization</code> are set to "denied" by default and remain "denied" even after you accept analytics consent — only <code>analytics_storage</code> is upgraded. AIWatch does not build an advertising profile from your visits.</p>
       <h3 style={headingStyle}>5. Service Worker (PWA)</h3>
       <p style={paraStyle}>AIWatch uses a service worker to cache static assets locally for faster loading and limited offline access. The service worker does not collect or transmit any personal data.</p>
       <h3 style={headingStyle}>6. Data Retention</h3>
-      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually. Your encrypted Discord or Slack webhook URL is retained on the server until you unsubscribe — unsubscribing deletes it immediately and permanently; subscriptions whose webhook stops accepting deliveries may also be removed automatically.</p>
+      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Microsoft Clarity keeps session recordings for 30 days (a favorited or randomly sampled recording, and heatmaps, for up to 9 months). Local storage data is retained in your browser until you clear it manually. Your encrypted Discord or Slack webhook URL is retained on the server until you unsubscribe — unsubscribing deletes it immediately and permanently; subscriptions whose webhook stops accepting deliveries may also be removed automatically.</p>
       <h3 style={headingStyle}>7. Third-Party Services</h3>
       <p style={paraStyle}>AIWatch uses the following third-party services that may process your data:<br /><br />
         · Google Analytics 4 — usage analytics<br />
+        · Microsoft Clarity — session replay and heatmaps (only with analytics consent)<br />
         · Cloudflare Workers — API proxy and caching<br />
         · Vercel — web hosting<br />
         · GitHub API — repository star count display<br />
@@ -54,7 +56,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>8. Your Rights</h3>
       <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time:<br /><br />
         · <strong>Recommended</strong>: in your browser's DevTools, run <code>localStorage.removeItem('aiwatch-cookie-consent')</code> to make the cookie banner re-appear, then choose Essential Only. This preserves your dashboard preferences (theme, language, enabled services).<br />
-        · <strong>Manual</strong>: run <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> in your browser's DevTools console. On the next page load, AIWatch reads this value and automatically removes any remaining analytics cookies — the documented manual path produces the same end state as the banner Essential-Only choice.</p>
+        · <strong>Manual</strong>: run <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> in your browser's DevTools console. On the next page load, AIWatch reads this value and automatically removes any remaining analytics cookies on ai-watch.dev — the documented manual path produces the same end state as the banner Essential-Only choice.</p>
       <h3 style={headingStyle}>9. Children's Privacy</h3>
       <p style={paraStyle}>AIWatch does not knowingly collect information from children under the age of 14.</p>
       <h3 style={headingStyle}>10. Contact</h3>
@@ -66,7 +68,7 @@ export function PrivacyContent() {
 
   return (
     <div>
-      <p style={dateStyle}>최종 수정일: 2026년 10월</p>
+      <p style={dateStyle}>최종 수정일: 2026년 11월</p>
       <h3 style={headingStyle}>1. 수집하는 정보</h3>
       <p style={paraStyle}>AIWatch는 서비스 개선을 위해 Google Analytics 4(GA4)를 통해 다음 정보를 수집합니다.<br /><br />
         · 페이지 방문 기록 및 체류 시간<br />
@@ -74,6 +76,7 @@ export function PrivacyContent() {
         · 기기 종류, 브라우저, 운영체제<br />
         · 국가/지역 정보 (IP 익명화 적용)<br /><br />
         개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다. 분석 동의를 하지 않은 상태에서는 GA4가 Google Consent Mode v2의 cookieless 모드로 동작하며, 클라이언트 식별자가 저장되지 않은 익명 집계 ping만 전송됩니다.<br /><br />
+        <strong>세션 리플레이 (분석 동의 시에만)</strong> — "모두 동의"를 선택하면 AIWatch는 Microsoft Clarity도 불러옵니다. Clarity는 페이지 이용 방식(페이지 이동, 스크롤, 클릭, 마우스 움직임)을 기록해, 대시보드와 "Is X down?" 페이지에서 어디가 쓰기 어려운지 파악하는 데 쓰입니다. 입력란과 드롭다운에 입력한 내용은 Clarity가 가리며, Discord Webhook 입력란은 AIWatch가 추가로 가립니다. Clarity는 ai-watch.dev에 _clck, _clsk 쿠키를 저장하고, Microsoft는 clarity.ms 도메인에 자체 쿠키(CLID, MUID, SM 등)를 저장합니다. Microsoft는 MUID를 "광고, 사이트 분석 및 기타 운영 목적"에 쓴다고 밝히고 있습니다. AIWatch는 Clarity의 Bing(c.bing.com) 연결을 차단하며, 이 쿠키를 광고에 사용하지 않습니다. clarity.ms에 저장된 쿠키는 AIWatch가 삭제할 수 없으며, 브라우저 설정에서 직접 삭제할 수 있습니다. 동의 전이나 동의 없이 Clarity를 불러오는 일은 없습니다.<br /><br />
         로딩 지연을 감지하기 위해 익명 성능 측정값을 접속 국가 및 요청을 처리한 Cloudflare 데이터센터와 함께 기록합니다. IP 주소는 저장하지 않습니다. 측정값 묶음마다 페이지를 불러올 때 생성한 무작위 식별자가 함께 기록되어, 느린 로딩을 방문 단위로 묶어 볼 수 있습니다. 이 식별자는 페이지 메모리에만 있고 기기에 저장되지 않으며 새로고침하면 새로 만들어집니다.</p>
       <h3 style={headingStyle}>2. 쿠키 및 로컬 저장소</h3>
       <p style={paraStyle}>AIWatch는 다음 유형의 브라우저 저장소를 사용합니다.<br /><br />
@@ -89,14 +92,15 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>3. 쿠키 배너</h3>
       <p style={paraStyle}>AIWatch 페이지를 처음 방문하면 분석 동의를 묻는 쿠키 배너가 표시됩니다(모두 동의 / 필수만 사용). 선택 결과는 <code>localStorage.aiwatch-cookie-consent</code>에 저장되어 이후 모든 AIWatch 페이지 방문에서 재사용됩니다. 브라우저 저장소를 비우기 전까지는 배너가 다시 표시되지 않습니다. 두 선택 모두 대시보드, "Is X down?" SEO 페이지, 월간 리포트에서 동일하게 적용됩니다.</p>
       <h3 style={headingStyle}>4. 광고</h3>
-      <p style={paraStyle}>AIWatch는 광고를 표시하지 않습니다. Google Consent Mode v2의 <code>ad_storage</code>, <code>ad_user_data</code>, <code>ad_personalization</code> 신호는 기본값이 "denied"이며, 분석 동의를 한 후에도 계속 "denied" 상태로 유지됩니다 — <code>analytics_storage</code>만 동의 시 "granted"로 변경됩니다. 방문 기록을 기반으로 광고 프로필을 생성하지 않습니다.</p>
+      <p style={paraStyle}>AIWatch는 광고를 표시하지 않습니다. Google Consent Mode v2의 <code>ad_storage</code>, <code>ad_user_data</code>, <code>ad_personalization</code> 신호는 기본값이 "denied"이며, 분석 동의를 한 후에도 계속 "denied" 상태로 유지됩니다 — <code>analytics_storage</code>만 동의 시 "granted"로 변경됩니다. AIWatch는 방문 기록을 기반으로 광고 프로필을 생성하지 않습니다.</p>
       <h3 style={headingStyle}>5. 서비스 워커 (PWA)</h3>
       <p style={paraStyle}>AIWatch는 빠른 로딩과 제한적 오프라인 접근을 위해 서비스 워커를 사용하여 정적 자산을 로컬에 캐싱합니다. 서비스 워커는 개인 정보를 수집하거나 전송하지 않습니다.</p>
       <h3 style={headingStyle}>6. 정보 보유 기간</h3>
-      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. 암호화된 Discord·Slack Webhook URL은 구독을 해제할 때까지 서버에 보관되며, 구독 해제 시 즉시 영구 삭제됩니다. Webhook이 더 이상 전송을 받지 못하는 구독은 자동으로 삭제될 수 있습니다.</p>
+      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. Microsoft Clarity의 세션 녹화는 30일간 보관됩니다(즐겨찾기 또는 무작위 표본으로 선정된 녹화와 히트맵은 최대 9개월). 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. 암호화된 Discord·Slack Webhook URL은 구독을 해제할 때까지 서버에 보관되며, 구독 해제 시 즉시 영구 삭제됩니다. Webhook이 더 이상 전송을 받지 못하는 구독은 자동으로 삭제될 수 있습니다.</p>
       <h3 style={headingStyle}>7. 개인정보 처리 위탁</h3>
       <p style={paraStyle}>AIWatch는 다음 제3자 서비스를 통해 데이터를 처리합니다.<br /><br />
         · Google Analytics 4 — 이용 통계 분석<br />
+        · Microsoft Clarity — 세션 리플레이 및 히트맵 (분석 동의 시에만)<br />
         · Cloudflare Workers — API 프록시 및 캐싱<br />
         · Vercel — 웹 호스팅<br />
         · GitHub API — 저장소 별 수 표시<br />
@@ -107,7 +111,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>8. 사용자의 권리</h3>
       <p style={paraStyle}>사용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />
         · <strong>권장</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.removeItem('aiwatch-cookie-consent')</code>을 실행하면 쿠키 배너가 다시 표시되며, "필수만 사용"을 선택할 수 있습니다. 대시보드 설정(테마, 언어, 활성화된 서비스)은 그대로 유지됩니다.<br />
-        · <strong>수동</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> 실행. 다음 페이지 로드 시 AIWatch가 이 값을 읽고 남아 있는 분석 쿠키를 자동으로 삭제합니다 — 수동 경로는 배너 "필수만 사용"과 동일한 최종 상태를 만듭니다.</p>
+        · <strong>수동</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> 실행. 다음 페이지 로드 시 AIWatch가 이 값을 읽고 ai-watch.dev에 남아 있는 분석 쿠키를 자동으로 삭제합니다 — 수동 경로는 배너 "필수만 사용"과 동일한 최종 상태를 만듭니다.</p>
       <h3 style={headingStyle}>9. 14세 미만 아동</h3>
       <p style={paraStyle}>AIWatch는 14세 미만 아동의 정보를 의도적으로 수집하지 않습니다.</p>
       <h3 style={headingStyle}>10. 문의</h3>

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useLang } from '../hooks/useLang'
 import { hasConsent, setConsent } from '../utils/analytics'
 
-export default function CookieBanner() {
+export default function CookieBanner({ onOpenPrivacy }) {
   const { t } = useLang()
   const [visible, setVisible] = useState(() => hasConsent() === null)
 
@@ -31,7 +31,13 @@ export default function CookieBanner() {
           {t('cookie.title')}
         </p>
         <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: '1.5', marginBottom: '10px' }}>
-          {t('cookie.description')}
+          {t('cookie.description')}{' '}
+          <a
+            href="#privacy"
+            onClick={(e) => { e.preventDefault(); onOpenPrivacy?.() }}
+            className="text-[var(--green)] hover:underline">
+            {t('cookie.privacyLink')}
+          </a>
         </p>
         <div className="flex gap-2">
           <button

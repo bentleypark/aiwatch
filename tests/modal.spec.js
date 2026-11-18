@@ -23,6 +23,20 @@ test.describe('Modal / Detail Panel', () => {
     await expect(closeBtn).toBeHidden({ timeout: 5000 })
   })
 
+  test('#privacy deep link opens the Privacy modal and cleans the URL (#2024)', async ({ page }) => {
+    await page.goto('/#privacy')
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(/수집하는 정보|Information We Collect/)).toBeVisible()
+    expect(new URL(page.url()).hash).toBe('')
+  })
+
+  test('cookie banner privacy link opens the Privacy modal in place (#2024)', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('a[href="#privacy"]').click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(/수집하는 정보|Information We Collect/)).toBeVisible()
+  })
+
   test('Privacy modal opens from footer and closes on ESC, restoring focus', async ({ page }) => {
     await page.goto('/')
     await waitForDataLoad(page)

@@ -18,3 +18,7 @@ export const GA_HIT_RE = /(google-analytics\.com|analytics\.google\.com)\//
 // worker allows. Unblocked, every PR run booked its page loads as real audience in `growth:daily`.
 // #2009 — also the "Check connection" counter (`/api/device-check`).
 export const AUDIENCE_BEACON_RE = /\/api\/(?:pageview|device-check)(?:$|[?#])/
+
+// #2024 — Microsoft Clarity (tag loader, script and upload hosts). The loader is also host-gated to
+// ai-watch.dev, so this is the second lock, not the first.
+export const CLARITY_RE = /^https:\/\/[a-z]+\.clarity\.ms\//
