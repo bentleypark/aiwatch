@@ -440,7 +440,8 @@ const en = {
 
   // Cookie Banner
   'cookie.title': 'Cookie Notice',
-  'cookie.description': 'AIWatch uses Google Analytics cookies to improve the service. Only anonymous usage statistics (pages visited, time spent) are collected. No personally identifiable information is gathered. Essential cookies (theme, language) are always used regardless of this setting.',
+  'cookie.description': 'AIWatch uses Google Analytics and Microsoft Clarity to understand how the site is used and improve it. No personally identifiable information is collected. Essential cookies (theme, language) are always used regardless of this setting.',
+  'cookie.privacyLink': "See what's collected in our Privacy Policy",
   'cookie.accept': 'Accept All',
   'cookie.essential': 'Essential Only',
 

@@ -8,6 +8,7 @@
 // AIWatch's own `aiwatch-dev` marketplace, so it works regardless of the claude-community review.
 
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { clarityInitScript } from '../_shared/clarity'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
 import { PLUGIN_MARKETPLACE_URL, renderPluginInstall } from '../_shared/plugin-cta'
@@ -23,6 +24,7 @@ export function renderPluginPage(nonce?: string): string {
 <title>AIWatch for Claude Code — outage plugin | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
+${clarityInitScript(nonce)}
 <meta name="description" content="A Claude Code plugin that tells you the moment an upstream AI service (Claude, OpenAI, Gemini, and more) goes down — a background outage monitor plus an /aiwatch status briefing, right in your terminal. Reads no code, collects no data.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">

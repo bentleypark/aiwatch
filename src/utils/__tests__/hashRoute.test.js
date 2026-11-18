@@ -18,6 +18,12 @@ describe('hashToPage', () => {
     expect(hashToPage('#')).toEqual({ name: 'overview' })
   })
 
+  it('#privacy / #terms open the legal modal over the overview and clean the URL (#2024)', () => {
+    expect(hashToPage('#privacy')).toEqual({ name: 'overview', modal: 'privacy' })
+    expect(hashToPage('#terms')).toEqual({ name: 'overview', modal: 'terms' })
+    expect(historySpy).toHaveBeenCalledTimes(2)
+  })
+
   it('maps known page hashes to their page', () => {
     for (const name of PAGE_NAMES) {
       expect(hashToPage(`#${name}`)).toMatchObject({ name })

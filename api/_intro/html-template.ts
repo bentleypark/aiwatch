@@ -1,6 +1,7 @@
 // SSR HTML template for the /intro landing page
 
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { clarityInitScript } from '../_shared/clarity'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
 import { EXTENSION_STORES, renderExtInstallCta } from '../_shared/extension-cta'
@@ -42,6 +43,7 @@ export function renderLandingPage(opts: LandingOptions = {}): string {
 <title>AIWatch — Real-time AI Service Monitoring</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
+${clarityInitScript(nonce)}
 <meta name="description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ai-watch.dev/intro">

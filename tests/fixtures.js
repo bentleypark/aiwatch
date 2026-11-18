@@ -19,9 +19,9 @@
 // inside it.
 
 import { test as base, expect } from '@playwright/test'
-import { GA_HIT_RE, AUDIENCE_BEACON_RE } from './ga-hosts.js'
+import { GA_HIT_RE, AUDIENCE_BEACON_RE, CLARITY_RE } from './ga-hosts.js'
 
-export { GA_HIT_RE, AUDIENCE_BEACON_RE }
+export { GA_HIT_RE, AUDIENCE_BEACON_RE, CLARITY_RE }
 
 // Block GA4 hits and the is-down audience beacon (#1436) on a Page or a BrowserContext. Specs that
 // build their own context or page off the `browser` fixture (bypassing the `context` override below)
@@ -30,6 +30,7 @@ export { GA_HIT_RE, AUDIENCE_BEACON_RE }
 export async function blockGaHits(pageOrContext) {
   await pageOrContext.route(GA_HIT_RE, (route) => route.abort())
   await pageOrContext.route(AUDIENCE_BEACON_RE, (route) => route.abort('blockedbyclient'))
+  await pageOrContext.route(CLARITY_RE, (route) => route.abort())
 }
 
 export const test = base.extend({

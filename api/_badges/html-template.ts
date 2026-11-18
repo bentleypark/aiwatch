@@ -8,6 +8,7 @@
 
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { clarityInitScript } from '../_shared/clarity'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
 
@@ -80,6 +81,7 @@ export function renderBadgesPage(nonce?: string): string {
 <title>AI Status Badges — Embed Live AI Service Status | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
+${clarityInitScript(nonce)}
 <meta name="description" content="Embed a live, real-time status badge for any of ${total} AI services (Claude, OpenAI, Gemini, and more) in your README, docs, or status page. Free, auto-updating, links to the live AIWatch status page.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">

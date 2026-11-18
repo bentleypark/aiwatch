@@ -18,6 +18,7 @@ import { notifyEdgeFallback } from './_shared/edge-fallback-alert'
 import { EXTENSION_STORES, renderExtInstallCta } from './_shared/extension-cta'
 import { slackInstallUrl, slackLogoSvg } from './_shared/slack-install'
 import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
+import { clarityInitScript } from './_shared/clarity'
 import { cookieBannerHtml } from './_shared/cookie-banner'
 import { getSEOContent } from './_is-down/seo-content'
 import { ALERT_CTA_CSS, ERRORS_CSS, renderScheduledMaintenance, type ServiceData, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, lastCheckedTime, renderIncidentTimeline } from './_is-down/html-template'
@@ -530,6 +531,7 @@ ${memberErrors.map(({ member, errors }) => `<details class="err-group"${SLUG_TO_
 <script type="application/ld+json">${safeJsonLd(jsonLd)}</script>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript()}
+${clarityInitScript()}
 <style>
   body { background:#080c10; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width:720px; margin:0 auto; padding:24px 16px; box-sizing:border-box; }
   @media (max-width:600px) { body { padding:16px 12px; } }

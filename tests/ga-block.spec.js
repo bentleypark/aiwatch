@@ -61,3 +61,16 @@ test.describe('GA4 hit block (#998)', () => {
     expect(aborted, 'gtag.js was aborted — GA_HIT_RE has widened past the carve-out in tests/ga-hosts.js').toEqual([])
   })
 })
+
+test('a request to a Microsoft Clarity host is aborted (#2024)', async ({ page }) => {
+  const failures = recordFailures(page)
+  await page.goto('/')
+  const outcome = await page.evaluate(
+    (u) => fetch(u, { mode: 'no-cors' }).then(() => 'completed', () => 'failed'),
+    'https://www.clarity.ms/tag/abc123xyz',
+  )
+  expect(outcome, 'a Clarity request COMPLETED — tests/fixtures.js is not blocking Clarity').toBe('failed')
+  const hits = failures.filter((f) => f.url.includes('clarity.ms'))
+  expect(hits.length).toBeGreaterThan(0)
+  for (const f of hits) expect(f.errorText).toBe(ABORTED)
+})

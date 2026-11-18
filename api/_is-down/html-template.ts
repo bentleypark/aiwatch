@@ -12,6 +12,7 @@ import { buildShareUrl } from './share-url'
 import { audienceBeaconScript } from '../_shared/audience-beacon'
 import { historyLinkAttrs, historyClickBeacon } from '../_shared/history-link'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { clarityInitScript } from '../_shared/clarity'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { lastedLine, resolvedDurationMin } from '../../worker/src/prediction-accuracy'
 import { EXTENSION_STORES, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
@@ -614,6 +615,7 @@ export function renderPage(
 
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript()}
+${clarityInitScript()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">

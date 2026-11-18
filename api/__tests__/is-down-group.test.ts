@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down-group'
+
+vi.mock('../_shared/clarity', () => ({ clarityInitScript: () => '<script data-clarity-wired></script>' }))
 import { isDownCacheControl } from '../_shared/is-down-cache'
 import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
@@ -167,6 +169,7 @@ describe('is-down-group.ts', () => {
     expect(html).toContain("gtag('consent','default'")
     expect(html).toContain('id="aiwatch-cookie-banner"')
     expect(html).toContain('data-aiwatch-cb="accept"')
+    expect(html).toContain('<script data-clarity-wired></script>')
   })
 
   describe('device check button (#2009)', () => {

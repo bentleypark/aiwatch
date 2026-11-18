@@ -106,7 +106,7 @@ export default function App() {
 function AppInner() {
   const [page, setPageState] = useState(() => hashToPage(window.location.hash))
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
+  const [modal, setModal] = useState(() => page.modal ?? null) // null | 'privacy' | 'terms'
   const [categoryFilter, setCategoryFilter] = useState('all')
   useTheme()
   const { t } = useLang()
@@ -124,7 +124,11 @@ function AppInner() {
 
   // Sync hash → page (browser back/forward)
   useEffect(() => {
-    const onPopState = () => setPageState(hashToPage(window.location.hash))
+    const onPopState = () => {
+      const p = hashToPage(window.location.hash)
+      setPageState(p)
+      if (p.modal) setModal(p.modal)
+    }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
@@ -214,7 +218,7 @@ function AppInner() {
         <TermsContent />
       </Modal>
 
-      <CookieBanner />
+      <CookieBanner onOpenPrivacy={() => { setModal('privacy'); trackEvent('open_legal', { type: 'privacy' }) }} />
       <InstallBanner />
     </PageContext.Provider>
     </PollingProvider>

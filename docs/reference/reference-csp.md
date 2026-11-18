@@ -52,6 +52,7 @@ report-uri /api/csp-report; report-to csp
   must refactor before enforcing. Adding `'unsafe-inline'` would suppress those reports and defeat the phase.
 - **`style-src` KEEPS `'unsafe-inline'`** — inline `style=` attributes are pervasive in the SSR templates
   and are low XSS risk; CSP3 `'unsafe-hashes'` for style attributes is brittle. Kept indefinitely.
+- **Microsoft Clarity (#2024)** — `www.clarity.ms` (tag loader) + `scripts.clarity.ms` (clarity.js) in script, `*.clarity.ms` in connect and img; `c.bing.com` is deliberately left out, so Clarity's Bing `MUID` sync is blocked, on all three policies (`vercel.json`, `csp-hash.ts`, `csp-nonce.ts`). The block above is the historical Phase 1 policy and does not list them.
 - **Allowlisted origins** (browser-loaded only): GA4 `googletagmanager.com` (gtag.js) in script+connect;
   `google-analytics.com` + `region1.google-analytics.com` (GA4 beacons) in connect; Kakao
   `t1.kakaocdn.net` (share SDK, injected on is-down) in script, and `*.kakao.com` in **form-action** on the
