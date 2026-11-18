@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderLandingPage } from '../html-template'
+import en from '../../../src/locales/en.js'
 import { expectEveryStoreLink } from '../../_shared/__tests__/expect-store-links'
 
 // #482 — CSP Phase 2: the /intro landing page must carry NO inline event handlers (all wired via
@@ -74,5 +75,86 @@ describe('renderLandingPage — CSP-clean (#482)', () => {
 describe('renderLandingPage — extension install CTA', () => {
   it('carries one install link per extension store (#1773)', () => {
     expectEveryStoreLink(renderLandingPage(), 'landing_cta')
+  })
+})
+
+// #2031 — dashboard wording the preview mock imitates, built from en.js.
+type Strings = Record<string, string>
+// The Overview's category tabs, in its order: 'all' then SECTION_KEYS (src/pages/Overview.jsx).
+const CATEGORY_TABS = ['filter.all', 'filter.llm', 'filter.agents', 'filter.voice', 'filter.inference', 'filter.observability', 'filter.video', 'filter.image', 'filter.apps']
+const MOCK_WORDING: Array<[label: string, text: (t: Strings) => string]> = [
+  ['Affected now heading', (t) => t['overview.affected.title']],
+  ['Affected now scope', (t) => `· ${t['overview.affected.scope']}`],
+  ['affected count', (t) => t['overview.affected.degraded'].replace('{n}', '1')],
+  ['view incident details', (t) => t['overview.banner.viewIncidents']],
+  ['suggested fallback', (t) => t['overview.banner.fallback']],
+  ['entry start line', (t) => `${t['incidents.time.started']} 14:23 UTC · ${t['incidents.status.ongoing']}`],
+  ['recent incidents title', (t) => `${t['overview.incidents.title']} <span`],
+  ['recent incident status', (t) => `>${t['incidents.status.ongoing']}<`],
+  ['running stat', (t) => t['overview.stats.operational.sub']],
+  ['affected stat', (t) => t['overview.stats.degraded.sub']],
+  ['average stat', (t) => t['overview.stats.uptime.sub']],
+  ['all filter', (t) => `>${t['overview.filter.all']} 50<`],
+  ['operational filter', (t) => `${t['overview.filter.operational']} 49`],
+  ['issues filter', (t) => `${t['overview.filter.issues']} 1`],
+  ['operational stat label', (t) => `mock-stat-label">${t['overview.stats.operational']}<`],
+  ['degraded stat label', (t) => `mock-stat-label">${t['overview.stats.degraded']}<`],
+  ['down stat label', (t) => `mock-stat-label">${t['overview.stats.down']}<`],
+  ['average stat label', (t) => `mock-stat-label">${t['overview.stats.uptime']}<`],
+  ['down stat sub', (t) => `>${t['overview.stats.down.sub']}<`],
+  ...CATEGORY_TABS.map((key): [string, (t: Strings) => string] => [
+    `category tab ${key}`,
+    (t) => `mock-cat-tab${key === 'filter.all' ? ' active' : ''}">${t[key].replace(/&/g, '&amp;')}<`,
+  ]),
+  ['LLM section header', (t) => `green-slash">//</span> ${t['filter.llm']}<`],
+]
+
+const CARD_LABELS: Array<(t: Strings) => string> = [
+  (t) => `mock-card-metric-label">${t['overview.card.latency.api']}<`,
+  (t) => `mock-card-metric-label">${t['overview.card.uptime']}<`,
+  (t) => `mock-card-metric-label">${t['overview.card.incidents']}<`,
+  (t) => `mock-card-score-label">${t['score.bar.label']}<`,
+]
+
+describe('renderLandingPage — dashboard preview wording (#2031)', () => {
+  const html = renderLandingPage().toLowerCase()
+  const t = en as Strings
+
+  it('the banner sits above the stat cards, as in the Overview', () => {
+    expect(html.indexOf(t['overview.affected.title'].toLowerCase())).toBeGreaterThan(-1)
+    expect(html.indexOf(t['overview.affected.title'].toLowerCase())).toBeLessThan(html.indexOf(t['overview.stats.operational.sub'].toLowerCase()))
+  })
+
+  it('both degraded pills (banner entry and Claude API card) say what the dashboard says', () => {
+    expect(html.split(`badge-warn">${t['status.degraded']}<`.toLowerCase()).length - 1).toBeGreaterThanOrEqual(2)
+  })
+
+  it('every sample card carries the dashboard\'s metric and score labels', () => {
+    const cards = html.split('class="mock-card-header"').length - 1
+    expect(cards).toBeGreaterThan(0)
+    for (const label of CARD_LABELS) {
+      const wanted = label(t).toLowerCase()
+      expect(wanted, 'a locale key behind a card label is gone from src/locales/en.js').not.toContain('undefined')
+      expect(html.split(wanted).length - 1, wanted).toBe(cards)
+    }
+  })
+
+  it('on each card the compact line comes before the 30-day bars, and a card with no open incident omits the count', () => {
+    const cards = html.split('class="mock-card-header"').slice(1)
+    expect(cards).toHaveLength(3)
+    for (const card of cards) {
+      const compact = card.indexOf('class="mock-card-compact"')
+      expect(compact).toBeGreaterThan(-1)
+      expect(compact).toBeLessThan(card.indexOf('class="mock-history"'))
+    }
+    expect(html).toContain(`>1${t['overview.card.incidents.compact']}<`.toLowerCase())
+    expect(html).not.toContain(`0${t['overview.card.incidents.compact']}`.toLowerCase())
+  })
+
+  it.each(MOCK_WORDING)('the mock says what the dashboard says: %s', (_label, text) => {
+    let wanted = ''
+    try { wanted = text(t) } catch { /* a key behind this row is gone */ }
+    expect(typeof wanted === 'string' && wanted !== '' && !wanted.includes('undefined'), 'a locale key behind this row is gone from src/locales/en.js').toBe(true)
+    expect(html).toContain(wanted.toLowerCase())
   })
 })

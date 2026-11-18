@@ -155,8 +155,10 @@ is the *procedure* — follow it top to bottom.
    keep it **lean, ~40k-char guideline** — check `python3 -c "print(len(open('CLAUDE.md').read()))"`,
    move detail to `docs/reference/` if near), the relevant **`docs/reference/`** file (see the
    directory — kv-schema, ga4-events, fallback-tiers, status-determination, discord-alert-paths, etc.),
-   README(.ko), `CONTRIBUTING.md`, `index.html` SEO meta, `aiwatch-reports/`. Adding a service → the
-   full `adding-a-service.md` checklist.
+   README(.ko), `CONTRIBUTING.md`, `index.html` SEO meta, `aiwatch-reports/`, and the landing page
+   `api/_intro/html-template.ts` (its dashboard preview, feature cards, alert list, and any rule it restates
+   from `/methodology`) — a user-visible change gets its PR-template box ticked or marked N/A. Adding a
+   service → the full `adding-a-service.md` checklist.
 8. **Commit + PR** (gate #3 — only after the user confirms):
    - Commit message + PR body end with the required Co-Authored-By / 🤖 footer.
    - `closes #N` **only when ALL checklist items are done AND verified** — this includes

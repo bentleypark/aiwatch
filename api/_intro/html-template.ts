@@ -83,6 +83,7 @@ ${clarityInitScript(nonce)}
     --green: #3fb950; --green-dim: #1a3d25;
     --blue: #58a6ff; --amber: #e86235; --yellow: #faa72a; --red: #f85149;
     --border: #30363d; /* opaque equivalent for SSR — production uses rgba(255,255,255,0.07) */
+    --border-hi: #484f58;
     --font-mono: 'JetBrains Mono', monospace;
     --font-sans: 'Pretendard', -apple-system, sans-serif;
   }
@@ -247,7 +248,10 @@ ${clarityInitScript(nonce)}
   .mock-stat-label { font-size: 9px; color: var(--text2); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
   .mock-stat-value { font-size: 26px; font-weight: 600; font-family: var(--font-mono); }
   .mock-stat-sub { font-size: 10px; color: var(--text2); font-family: var(--font-mono); margin-top: 2px; }
-  .mock-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .mock-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mock-cat-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mock-cat-tab { font-family: var(--font-mono); font-size: 10px; padding: 4px 10px; border-radius: 4px; background: var(--bg2); border: 1px solid var(--border); color: var(--text2); white-space: nowrap; }
+  .mock-cat-tab.active { background: var(--bg3); border-color: var(--border-hi); color: var(--text0); }
   .mock-section-title { font-family: var(--font-mono); font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 6px; }
   .mock-section-title .green-slash { color: var(--green); font-weight: 600; }
   .mock-filter-tabs { display: flex; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 2px; gap: 1px; }
@@ -472,7 +476,8 @@ ${clarityInitScript(nonce)}
     .mock-card-compact { display: flex !important; }
     .mock-history { height: 10px; transform: scaleY(0.55); transform-origin: bottom; }
     .mock-badge { font-size: 9px; padding: 2px 6px; }
-    .mock-filter-tabs { display: none; }
+    .mock-controls { flex-direction: column; align-items: flex-start; }
+    .mock-card-provider { display: none; }
     .mock-panel { display: none; }
 
     /* Features */
@@ -654,49 +659,73 @@ ${announcementHtml}
       </div>
     </div>
     <div class="mock-body">
-      <!-- Stats Cards -->
-      <div class="mock-stats-row">
-        <div class="mock-stat-card stat-green"><div class="mock-stat-value" style="color:var(--green);">49</div><div class="mock-stat-sub">services running</div></div>
-        <div class="mock-stat-card stat-amber"><div class="mock-stat-value" style="color:var(--amber);">1</div><div class="mock-stat-sub">partially affected</div></div>
-        <div class="mock-stat-card stat-red"><div class="mock-stat-value" style="color:var(--red);">0</div><div class="mock-stat-sub">—</div></div>
-        <div class="mock-stat-card stat-blue"><div class="mock-stat-value" style="color:var(--blue);">99.6%</div><div class="mock-stat-sub">Overall average</div></div>
-      </div>
-      <!-- Action Banner -->
-      <div style="background:var(--bg1);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:8px;padding:10px 14px;margin-bottom:16px;line-height:1.5;">
-        <div style="font-size:13px;font-weight:500;color:var(--text0);">⚠️ Degraded <span style="color:var(--amber);">(1)</span>: Claude API</div>
+      <!-- Overview banner -->
+      <div style="background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;line-height:1.5;">
+        <div style="font-size:10px;font-family:var(--font-mono);letter-spacing:0.1em;text-transform:uppercase;color:var(--text2);margin-bottom:4px;"><span style="color:var(--red);font-weight:600;">//</span> Affected now <span style="text-transform:none;letter-spacing:0;">· all categories</span></div>
+        <div style="font-size:13px;font-weight:500;color:var(--amber);">⚠️ Degraded 1</div>
         <div style="font-size:11px;font-family:var(--font-mono);margin-top:3px;">
           👉 <span style="color:var(--blue);cursor:pointer;">View incident details</span>
         </div>
         <div style="font-size:11px;color:var(--text2);font-family:var(--font-mono);margin-top:4px;">
           Suggested fallback: <span style="color:var(--text2);">API → </span><span style="color:var(--green);">OpenAI API (88)</span>, <span style="color:var(--green);">Gemini API (78)</span>
         </div>
+        <div style="background:var(--bg1);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:8px;padding:10px 12px;margin-top:10px;">
+          <div style="font-size:12px;font-weight:500;color:var(--text0);">Elevated error rates on Opus 4.6 Fast Mode</div>
+          <div style="font-size:10px;font-family:var(--font-mono);color:var(--text2);">Started 14:23 UTC · In Progress</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;">
+            <span style="font-size:13px;font-weight:500;color:var(--text0);">Claude API <span style="font-family:var(--font-mono);font-size:10px;color:var(--text2);margin-left:8px;">Anthropic</span></span>
+            <span class="mock-badge badge-warn">DEGRADED</span>
+          </div>
+        </div>
       </div>
-      <!-- Section Header + Filter -->
-      <div class="mock-section-header">
-        <div class="mock-section-title"><span class="green-slash">//</span> Services</div>
+      <!-- Stats Cards -->
+      <div class="mock-stats-row">
+        <div class="mock-stat-card stat-green"><div class="mock-stat-label">Operational</div><div class="mock-stat-value" style="color:var(--green);">49</div><div class="mock-stat-sub">services running</div></div>
+        <div class="mock-stat-card stat-amber"><div class="mock-stat-label">Degraded</div><div class="mock-stat-value" style="color:var(--amber);">1</div><div class="mock-stat-sub">partially affected</div></div>
+        <div class="mock-stat-card stat-red"><div class="mock-stat-label">Down</div><div class="mock-stat-value" style="color:var(--red);">0</div><div class="mock-stat-sub">service down</div></div>
+        <div class="mock-stat-card stat-blue"><div class="mock-stat-label">avg uptime</div><div class="mock-stat-value" style="color:var(--blue);">99.6%</div><div class="mock-stat-sub">Overall average</div></div>
+      </div>
+      <!-- Services controls: category tabs, then the status filter -->
+      <div class="mock-controls">
+        <div class="mock-cat-tabs">
+          <span class="mock-cat-tab active">All</span>
+          <span class="mock-cat-tab">LLM APIs</span>
+          <span class="mock-cat-tab">Coding Agents</span>
+          <span class="mock-cat-tab">Voice</span>
+          <span class="mock-cat-tab">Inference &amp; Infra</span>
+          <span class="mock-cat-tab">Observability</span>
+          <span class="mock-cat-tab">Video</span>
+          <span class="mock-cat-tab">Image</span>
+          <span class="mock-cat-tab">AI Apps</span>
+        </div>
         <div class="mock-filter-tabs">
           <span class="mock-filter-tab active">All 50</span>
           <span class="mock-filter-tab">Operational 49</span>
           <span class="mock-filter-tab">Issues 1<span class="mock-filter-dot"></span></span>
         </div>
       </div>
+      <div class="mock-section-title" style="margin-bottom:8px;"><span class="green-slash">//</span> LLM APIs</div>
       <!-- Service Cards -->
       <div class="mock-cards">
         <!-- Claude API — degraded -->
         <div class="mock-card degraded">
           <div class="mock-card-header">
             <div><div class="mock-card-name">Claude API</div><div class="mock-card-provider">Anthropic</div></div>
-            <span class="mock-badge badge-warn">PARTIAL OUTAGE</span>
+            <span class="mock-badge badge-warn">DEGRADED</span>
           </div>
           <div class="mock-card-grid">
-            <div><div class="mock-card-metric-val" style="color:var(--green);">145ms</div><div class="mock-card-metric-label">status page</div></div>
-            <div><div class="mock-card-metric-val" style="color:var(--amber);">99.34%</div><div class="mock-card-metric-label">uptime</div></div>
+            <div><div class="mock-card-metric-val" style="color:var(--green);">145ms</div><div class="mock-card-metric-label">API response</div></div>
+            <div><div class="mock-card-metric-val" style="color:var(--green);">99.34%</div><div class="mock-card-metric-label">uptime</div></div>
             <div><div class="mock-card-metric-val" style="color:var(--text0);">1</div><div class="mock-card-metric-label">incidents</div></div>
           </div>
           <div class="mock-card-score">
             <span class="mock-card-score-label">Score</span>
             <div class="mock-card-score-bar"><div class="mock-card-score-fill" style="width:62%;background:var(--yellow);"></div></div>
             <span class="mock-card-score-badge" style="background:var(--yellow);color:var(--bg0);">62 fair</span>
+          </div>
+          <!-- Mobile compact -->
+          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);margin-bottom:4px;">
+            <span><span style="color:var(--green);">99.34%</span> · <span style="color:var(--red);">1 inc</span> · 62 fair</span>
           </div>
           <div class="mock-history">
             <span style="height:15px;background:var(--green);opacity:0.6;"></span><span style="height:18px;background:var(--green);opacity:0.6;"></span>
@@ -715,10 +744,6 @@ ${announcementHtml}
             <span style="height:15px;background:var(--green);opacity:0.6;"></span><span style="height:6px;background:var(--amber);opacity:0.8;"></span>
             <span style="height:17px;background:var(--green);opacity:0.6;"></span><span style="height:14px;background:var(--green);opacity:0.6;"></span>
           </div>
-          <!-- Mobile compact -->
-          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);">
-            <span>99.34% · 1 inc · 62 fair</span>
-          </div>
         </div>
         <!-- OpenAI API — operational -->
         <div class="mock-card ok">
@@ -727,7 +752,7 @@ ${announcementHtml}
             <span class="mock-badge badge-ok">OPERATIONAL</span>
           </div>
           <div class="mock-card-grid">
-            <div><div class="mock-card-metric-val" style="color:var(--green);">89ms</div><div class="mock-card-metric-label">status page</div></div>
+            <div><div class="mock-card-metric-val" style="color:var(--green);">89ms</div><div class="mock-card-metric-label">API response</div></div>
             <div><div class="mock-card-metric-val" style="color:var(--green);">99.99%</div><div class="mock-card-metric-label">uptime</div></div>
             <div><div class="mock-card-metric-val" style="color:var(--text0);">0</div><div class="mock-card-metric-label">incidents</div></div>
           </div>
@@ -735,6 +760,9 @@ ${announcementHtml}
             <span class="mock-card-score-label">Score</span>
             <div class="mock-card-score-bar"><div class="mock-card-score-fill" style="width:92%;background:var(--green);"></div></div>
             <span class="mock-card-score-badge" style="background:var(--green);color:var(--bg0);">92 excellent</span>
+          </div>
+          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);margin-bottom:4px;">
+            <span><span style="color:var(--green);">99.99%</span> · 92 excellent</span>
           </div>
           <div class="mock-history">
             <span style="height:17px;background:var(--green);opacity:0.6;"></span><span style="height:13px;background:var(--green);opacity:0.6;"></span>
@@ -753,9 +781,6 @@ ${announcementHtml}
             <span style="height:16px;background:var(--green);opacity:0.6;"></span><span style="height:13px;background:var(--green);opacity:0.6;"></span>
             <span style="height:14px;background:var(--green);opacity:0.6;"></span><span style="height:18px;background:var(--green);opacity:0.6;"></span>
           </div>
-          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);">
-            <span>99.99% · 0 inc · 92 excellent</span>
-          </div>
         </div>
         <!-- Gemini API — operational -->
         <div class="mock-card ok">
@@ -764,7 +789,7 @@ ${announcementHtml}
             <span class="mock-badge badge-ok">OPERATIONAL</span>
           </div>
           <div class="mock-card-grid">
-            <div><div class="mock-card-metric-val" style="color:var(--green);">112ms</div><div class="mock-card-metric-label">status page</div></div>
+            <div><div class="mock-card-metric-val" style="color:var(--green);">112ms</div><div class="mock-card-metric-label">API response</div></div>
             <div><div class="mock-card-metric-val" style="color:var(--green);">99.97%</div><div class="mock-card-metric-label">uptime</div></div>
             <div><div class="mock-card-metric-val" style="color:var(--text0);">0</div><div class="mock-card-metric-label">incidents</div></div>
           </div>
@@ -772,6 +797,9 @@ ${announcementHtml}
             <span class="mock-card-score-label">Score</span>
             <div class="mock-card-score-bar"><div class="mock-card-score-fill" style="width:78%;background:var(--green);"></div></div>
             <span class="mock-card-score-badge" style="background:var(--green);color:var(--bg0);">78 good</span>
+          </div>
+          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);margin-bottom:4px;">
+            <span><span style="color:var(--green);">99.97%</span> · 78 good</span>
           </div>
           <div class="mock-history">
             <span style="height:16px;background:var(--green);opacity:0.6;"></span><span style="height:13px;background:var(--green);opacity:0.6;"></span>
@@ -789,9 +817,6 @@ ${announcementHtml}
             <span style="height:12px;background:var(--green);opacity:0.6;"></span><span style="height:15px;background:var(--green);opacity:0.6;"></span>
             <span style="height:18px;background:var(--green);opacity:0.6;"></span><span style="height:17px;background:var(--green);opacity:0.6;"></span>
             <span style="height:13px;background:var(--green);opacity:0.6;"></span><span style="height:14px;background:var(--green);opacity:0.6;"></span>
-          </div>
-          <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);">
-            <span>99.97% · 0 inc · 78 good</span>
           </div>
         </div>
         <!-- More services -->
@@ -893,7 +918,7 @@ ${announcementHtml}
         <div class="feature-tag">SCORE</div>
         <div class="feature-icon">📊</div>
         <div class="feature-title" data-i18n="feat.1.title">AIWatch Score</div>
-        <div class="feature-desc" data-i18n="feat.1.desc">Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 패널티가 적용됩니다.</div>
+        <div class="feature-desc" data-i18n="feat.1.desc">Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다.</div>
       </div>
       <div class="feature-card fade-up delay-1">
         <div class="feature-tag">AI ANALYSIS BETA</div>
@@ -1140,7 +1165,7 @@ const i18n = {
     'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord · Slack · RSS 알림 포함', 'stats.oss': '오픈소스',
     'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 47개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 패널티가 적용됩니다.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 AIWatch가 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
@@ -1169,7 +1194,7 @@ const i18n = {
     'stats.services': 'Services monitored', 'stats.interval': 'Auto-collected', 'stats.free': 'Discord · Slack · RSS alerts included', 'stats.oss': 'Open source',
     'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 47 more services...',
     'feat.title': 'Beyond status monitoring', 'feat.sub': 'An AI monitoring dashboard that helps you make decisions',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (40) + Incident impact days (25) + Recovery time (15) + Responsiveness (20). Services without official data use industry averages with a penalty.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (40) + Incident impact days (25) + Recovery time (15) + Responsiveness (20).',
     'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, AIWatch analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-api-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
