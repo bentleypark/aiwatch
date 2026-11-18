@@ -18,6 +18,7 @@ import { ARCHIVE_REBUILD_CAVEAT, type ArchiveHealth, type Guard3HoldRecord } fro
 import { AUDIENCE_SOURCES, AUDIENCE_SURFACES, AUDIENCE_SURFACE_UNKNOWN, type AudienceByScreen, type AudienceCounts, type AudienceSource } from './outage-audience'
 import { ALERTED_NEW_TTL_S, FAMILY_OF_SERVICE, parseAlertedRoster } from './alerts'
 import type { ClickRateCounts, HistoryClickCounts } from './history-click'
+import { formatCspViolationLine, type CspViolationCounts } from './csp-violation'
 import { clientMinutesFromPolls, formatClientTime, EXT_POLL_PERIOD_MINUTES, PLUGIN_POLL_PERIOD_SECONDS } from './api-traffic'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta, BadgeTrafficCounts, FeedTrafficCounts, FeedPollsByTarget } from './api-traffic'
 import { BADGE_UNKNOWN_SERVICE, FEED_UNKNOWN_TARGET, rollupByClient, subscriberFeeds, type AllFeedState } from './api-traffic'
@@ -158,6 +159,7 @@ export interface DailySummaryData {
   historyClicks?: HistoryClickCounts | null
   // #2009 — last-24h completed "Check connection" checks and the views of the pages that carry the button (WAE). null when unconfigured.
   deviceChecks?: ClickRateCounts | null
+  cspViolations?: CspViolationCounts | null
   /** #1257 — `null` = not read (no credentials, or the query failed); the line says so. */
   drops?: DropCount[] | null
   // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
@@ -425,6 +427,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (historyClickLine) lines.push(historyClickLine)
   const deviceCheckLine = formatDeviceCheckLine(data.deviceChecks)
   if (deviceCheckLine) lines.push(deviceCheckLine)
+  const cspLine = formatCspViolationLine(data.cspViolations)
+  if (cspLine) lines.push(cspLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)

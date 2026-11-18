@@ -1261,6 +1261,13 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(out).toContain('📜 **30-day History Link** (24h)')
     expect(buildDailySummary({ ...minimal })).not.toContain('Check Connection')
   })
+
+  it('renders the CSP violation read, and nothing when the read failed (#2026)', () => {
+    const minimal = { services: [makeSvc()], aiUsage: null, incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+    const out = buildDailySummary({ ...minimal, cspViolations: { total: 3, rows: [{ directive: 'connect-src', blocked: 'www.google.com', n: 3 }] } })
+    expect(out).toContain('🛡️ **CSP Violations** (24h): 3 — connect-src www.google.com ×3')
+    expect(buildDailySummary({ ...minimal })).not.toContain('CSP Violations')
+  })
 })
 
 describe('formatAudienceScreenRow (#1280 — which screen the views landed on)', () => {

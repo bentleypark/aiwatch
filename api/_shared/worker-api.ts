@@ -15,3 +15,16 @@ function readEnv(name: string): string | undefined {
 export function resolveWorkerApi(prodApi: string, env: (name: string) => string | undefined = readEnv): string {
   return env('VERCEL_ENV') === 'production' ? prodApi : env('AIWATCH_WORKER_API') || prodApi
 }
+
+export const PROD_WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+export const LOCAL_WORKER_API = 'http://localhost:8788'
+
+/** The worker chosen by the host of the incoming request: a `vercel dev` request (localhost) targets
+ *  the local `wrangler dev` worker, everything else the deployed one. */
+export function workerApiFor(reqUrl: string): string {
+  try {
+    const { hostname } = new URL(reqUrl)
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return LOCAL_WORKER_API
+  } catch { /* fall through to prod */ }
+  return PROD_WORKER_API
+}

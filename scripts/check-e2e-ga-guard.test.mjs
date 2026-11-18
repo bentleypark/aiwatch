@@ -15,6 +15,7 @@ test('GA_HIT_RE matches every GA4 collect endpoint the CSP allows', () => {
     'https://region1.google-analytics.com/g/collect?v=2',
     'https://analytics.google.com/g/collect?v=2',
     'https://www.google-analytics.com/mp/collect',
+    'https://www.google.com/g/collect?v=2&tid=G-D4ZWVHQ7JK',
   ]) {
     assert.ok(GA_HIT_RE.test(url), `must block ${url}`)
   }
@@ -22,6 +23,7 @@ test('GA_HIT_RE matches every GA4 collect endpoint the CSP allows', () => {
 
 test('GA_HIT_RE does NOT match gtag.js — consent.spec needs the loader to reach the browser', () => {
   assert.ok(!GA_HIT_RE.test('https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK'))
+  assert.ok(!GA_HIT_RE.test('https://www.google.com/search?q=g/collect'))
 })
 
 test('AUDIENCE_BEACON_RE matches the production beacon endpoints (#1436, #2009)', () => {

@@ -3,8 +3,9 @@
 // Both Vercel templates import this. The Jekyll reports footer
 // (aiwatch-reports/_includes/footer.html) keeps a hand-synced copy.
 //
-// UX/copy mirrors src/components/CookieBanner.jsx in the SPA. Same localStorage key
-// (`aiwatch-cookie-consent`) — only shows when the key is absent.
+// Same buttons, opening sentences and Privacy Policy link as src/components/CookieBanner.jsx in the SPA,
+// which adds one line on its essential cookies (theme, language). Same
+// localStorage key (`aiwatch-cookie-consent`) — only shows when the key is absent.
 //
 // Accept-failure handling: if `localStorage.setItem` throws (Safari private mode, quota,
 // embedded webview), the Accept branch returns WITHOUT calling `gtag('consent','update',

@@ -111,8 +111,9 @@ describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces vi
     expect(csp).toContain('report-to csp')
   })
 
-  it('declares the Reporting-Endpoints csp group → /api/csp-report', () => {
-    const re = spaCspBlock().headers.find((h) => h.key === 'Reporting-Endpoints')
+  it('declares the Reporting-Endpoints csp group → /api/csp-report on every path (#2026)', () => {
+    const block = vercelConfig.headers?.find((h) => h.source === '/(.*)')
+    const re = block?.headers.find((h) => h.key === 'Reporting-Endpoints')
     expect(re?.value).toContain('csp=')
     expect(re?.value).toContain('/api/csp-report')
   })

@@ -50,6 +50,28 @@ test.describe('Edge SSR pages — shared contract (#1051)', () => {
   }
 })
 
+// #2026 — production CSP blocked the SPA's GitHub star fetch and a gtag beacon, and no test failed. '/' is
+// the SPA, which carries vercel.json's policy only when served by Vercel (`vercel dev` or the Preview).
+const CSP_PAGES = ['/', '/is-claude-down', '/is-openai-api-down', '/intro', '/methodology', '/badges', '/plugin', '/plugin-privacy', '/extension-privacy', '/slack?result=installed']
+
+test.describe('no CSP violation on load (#2026)', () => {
+  for (const consent of [null, 'denied', 'granted']) {
+    for (const path of CSP_PAGES) {
+      test(`${path} with consent ${consent}`, async ({ page, baseURL }) => {
+        test.skip(path === '/' && /localhost/.test(baseURL), '`vercel dev` answers / with a 307 to itself; the Preview run checks it')
+        if (consent) await page.addInitScript((c) => localStorage.setItem('aiwatch-cookie-consent', c), consent)
+        const violations = []
+        page.on('console', (m) => {
+          if (/Content Security Policy/.test(m.text())) violations.push(m.text())
+        })
+        await page.goto(path, { waitUntil: 'networkidle' })
+        await page.waitForTimeout(2000)
+        expect(violations).toEqual([])
+      })
+    }
+  }
+})
+
 test.describe('/plugin serves install commands that resolve (#920)', () => {
   test('renders the exact commands the code publishes', async ({ page }) => {
     await page.goto('/plugin', { waitUntil: 'domcontentloaded' })

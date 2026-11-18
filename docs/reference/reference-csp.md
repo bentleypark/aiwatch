@@ -26,12 +26,13 @@ AIWatch ships a CSP across the Vercel-served surfaces (SPA + Edge SSR). Rolled o
   `'sha256-…'` if the `index.html` inline scripts change (pinned by `api/__tests__/csp-headers.test.ts`,
   which hashes them and asserts the source scoping).
 - Every inline `on*=` handler across all surfaces was refactored to a delegated listener first.
-- `Reporting-Endpoints: csp="/api/csp-report"` still set; all headers report to the same sink.
+- `Reporting-Endpoints: csp="/api/csp-report"` is set by its own `vercel.json` block on `/(.*)`, so the Edge SSR responses carry it too (#2026). Without it a browser that supports `report-to` drops the report.
 - **Sink**: **`api/csp-report.ts`** (Vercel Edge Function) receives violation reports via the policy's
   `report-uri` (legacy `application/csp-report`) + `report-to` (modern `application/reports+json`),
   normalizes both wire formats (`parseCspReports`), and logs one compact line per violation
-  (`summarizeCspReport`) → reviewable in Vercel function logs. Always `204`s; `GET` → `405`.
-  Unauthenticated by design (a report sink takes anonymous browser beacons); it only logs, no KV/fan-out.
+  (`summarizeCspReport`); `forwardCspReports` sends them on to the worker's `POST /api/csp-violation`,
+  which writes a WAE point (#2026, `worker/src/csp-violation.ts`). Always `204`s; `GET` → `405`. Unauthenticated by design (a report sink
+  takes anonymous browser beacons).
 
 ### The policy (Phase 1 target, shipped as Report-Only)
 
@@ -54,7 +55,8 @@ report-uri /api/csp-report; report-to csp
   and are low XSS risk; CSP3 `'unsafe-hashes'` for style attributes is brittle. Kept indefinitely.
 - **Microsoft Clarity (#2024)** — `www.clarity.ms` (tag loader) + `scripts.clarity.ms` (clarity.js) in script, `*.clarity.ms` in connect and img; `c.bing.com` is deliberately left out, so Clarity's Bing `MUID` sync is blocked, on all three policies (`vercel.json`, `csp-hash.ts`, `csp-nonce.ts`). The block above is the historical Phase 1 policy and does not list them.
 - **Allowlisted origins** (browser-loaded only): GA4 `googletagmanager.com` (gtag.js) in script+connect;
-  `google-analytics.com` + `region1.google-analytics.com` (GA4 beacons) in connect; Kakao
+  `google-analytics.com` + `region1.google-analytics.com` + `www.google.com` (GA4 beacons, #2026) in connect;
+  `api.github.com` (SPA star count, #2026) in connect on `vercel.json` and `csp-nonce.ts` (the drift pin keeps those two equal); Kakao
   `t1.kakaocdn.net` (share SDK, injected on is-down) in script, and `*.kakao.com` in **form-action** on the
   hash-CSP pages only (`csp-hash.ts`) — the SDK form-POSTs to `sharer.kakao.com`, which redirects a
   logged-out viewer to `accounts.kakao.com`, and form-action is checked on every redirect (#1619); the **Worker origin** in connect (`/api/*`
@@ -64,8 +66,10 @@ report-uri /api/csp-report; report-to csp
   Worker fetches*, not browser loads — correctly excluded.
 
 ### Reviewing violations
-Read the Vercel function logs for `[csp-report]` lines (`directive=… blocked=… doc=… src=file:line`).
-Each is what an enforcing policy would block. Triage: a **legit origin** → add to the policy; an **inline
+The daily Discord summary's `🛡️ CSP Violations` line counts the last 24h by directive and blocked host
+(#2026). The Vercel function logs carry the full `[csp-report]` line (`directive=… blocked=… doc=…
+src=file:line`) only within their log window. Before merge, the `no CSP violation on load` e2e in
+`tests/edge-pages.spec.js` fails on a violation on any page it loads. Triage: a **legit origin** → add to the policy; an **inline
 script/handler** → refactor in Phase 2.
 
 ### Known expected reports (not bugs to chase)

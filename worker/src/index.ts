@@ -2252,6 +2252,7 @@ import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOut
 import { parsePageviewBody, recordOutageView, queryOutageAudience, classifyAgent, type AudienceCounts } from './outage-audience'
 import { parseHistoryClickBody, recordHistoryClick, queryHistoryClicks } from './history-click'
 import { parseDeviceCheckBody, recordDeviceCheck, queryDeviceChecks } from './device-check-click'
+import { parseCspViolationBody, recordCspViolation, queryCspViolations } from './csp-violation'
 import { recordDrop, queryDrops } from './drop-log'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import { recordDegradation } from './degradation-count'
@@ -4499,6 +4500,7 @@ const workerExport = {
             }
             const historyClicks = await queryHistoryClicks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
             const deviceChecks = await queryDeviceChecks(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            const cspViolations = await queryCspViolations(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
             const drops = await queryDrops(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
 
             // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
@@ -4660,6 +4662,7 @@ const workerExport = {
               audience,
               historyClicks,
               deviceChecks,
+              cspViolations,
               drops,
               extActivity,
               statuslineTraffic,
@@ -5019,6 +5022,23 @@ const workerExport = {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
           console.error('[device-check] ingest error:', err instanceof Error ? err.message : err)
           return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
+    // #2026 — a CSP violation report, forwarded by the Vercel sink (api/csp-report.ts) → WAE.
+    if (url.pathname === '/api/csp-violation') {
+      if (request.method === 'POST') {
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403 })
+        try {
+          const parsed = parseCspViolationBody(await request.json())
+          if (!parsed) return new Response(null, { status: 400 })
+          recordCspViolation(env.ANALYTICS, parsed)
+          return new Response(null, { status: 204 })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400 })
+          console.error('[csp-violation] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500 })
         }
       }
     }

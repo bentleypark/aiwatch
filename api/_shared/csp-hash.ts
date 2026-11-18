@@ -50,7 +50,7 @@ export function buildCspWithHashes(hashes: string[], opts: { enforce?: boolean; 
     "frame-ancestors 'none'",
     "form-action 'self' https://*.kakao.com",
     `script-src 'self' ${scriptHashes} https://www.googletagmanager.com https://t1.kakaocdn.net https://www.clarity.ms https://scripts.clarity.ms`,
-    `connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com https://*.clarity.ms${extraConnect}`,
+    `connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com https://www.google.com https://*.clarity.ms${extraConnect}`,
     "img-src 'self' data: https://ai-watch.dev https://aiwatch-worker.p2c2kbf.workers.dev https://*.clarity.ms",
     "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
     "font-src 'self' https://fonts.gstatic.com",
