@@ -79,8 +79,8 @@ export function isWithinPeriod(inc, cutoff) {
 
 /**
  * Shape an archive incidentList entry into the live-incident shape Incidents.jsx
- * already iterates. timeline:[] is intentional — archive only carries summary
- * fields; the DetailPanel must handle empty timelines gracefully (already does).
+ * already iterates. timeline:[] is intentional; the DetailPanel must handle empty
+ * timelines gracefully (already does).
  */
 export function archiveIncidentToLive(archIncident, service) {
   return {

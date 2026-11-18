@@ -8,7 +8,8 @@
 
 import type { ProbeDailyData, ProbeFailureCounts } from './probe-archival'
 import { summariesFromDailyData } from './probe-archival'
-import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
+import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary, TimelineEntry } from './types'
+import { firstUpdate } from './prediction-snapshot'
 import { calculateAIWatchScore, classifyProbe, mergeImpactWindows } from './score'
 import type { AIWatchScore } from './score'
 import { resolveProbeId, PROBE_TARGETS, type ProbeSpike } from './probe'
@@ -84,6 +85,8 @@ export interface MonthlyIncidentEntry {
   crossEventKey?: string
   /** #1922 — sticky: this incident was kept on the card at least once by `keepCarriedOpenIncidents`. */
   keptAfterComponentRecovery?: true
+  /** #2033 — every live sighting's `compactTimeline`, merged by `mergeCompactTimelines`. */
+  timeline?: CompactTimelineEntry[]
   // #975 — consecutive accumulation runs this UNRESOLVED entry has been confidently missing from the
   // upstream feed (see `prunePhantomIncidents`). Absent means zero: the field exists only while an
   // entry is in the missing state, so a resolved or currently-present entry serializes exactly as
@@ -463,6 +466,33 @@ export interface MonthlyIncidents {
  *  in the dashboard's 30/90-day list for hours. Raising it only delays cleanup; lowering it to 1 would
  *  make one bad parse destructive. */
 export const PHANTOM_PRUNE_AFTER_MISSED_RUNS = 3
+
+export interface CompactTimelineEntry {
+  at: string
+  stage: TimelineEntry['stage']
+  text?: string
+}
+
+/** #2033 — every update's time and stage, and the first non-empty update text (capped). Undefined
+ *  for a `status_history`-derived incident and for an empty timeline. */
+export function compactTimeline(inc: Pick<Incident, 'timeline' | 'derived'>): CompactTimelineEntry[] | undefined {
+  if (inc.derived || !inc.timeline?.length) return undefined
+  const timeline = [...inc.timeline].sort((a, b) => a.at.localeCompare(b.at))
+  const first = firstUpdate(timeline)
+  return timeline.map((t, i) => ({ at: t.at, stage: t.stage, ...(i === first?.index ? { text: first.text } : {}) }))
+}
+
+export function mergeCompactTimelines(stored: CompactTimelineEntry[] | undefined, live: CompactTimelineEntry[]): CompactTimelineEntry[] {
+  const byKey = new Map<string, CompactTimelineEntry>()
+  for (const e of [...(stored ?? []), ...live]) {
+    const key = `${e.at}|${e.stage}`
+    const prev = byKey.get(key)
+    byKey.set(key, !e.text && prev?.text ? { ...e, text: prev.text } : e)
+  }
+  const merged = [...byKey.values()].sort((a, b) => a.at.localeCompare(b.at))
+  const textAt = merged.findIndex(e => e.text)
+  return merged.map(({ text, ...e }, i) => (i === textAt ? { ...e, text } : e))
+}
 
 /** #975 — copy an accumulator entry for PUBLIC emission, dropping bookkeeping that exists only to
  *  drive the phantom prune. Both emit sites are trust boundaries: `buildPartialIncidentArchive` feeds
@@ -848,6 +878,8 @@ export function accumulateMonthlyIncidents(
           else delete existingDetail.zeroLengthRecord
           if (inc.crossEventKey) existingDetail.crossEventKey = inc.crossEventKey // #1859
           if (inc.keptAfterComponentRecovery) existingDetail.keptAfterComponentRecovery = true
+          const timeline = compactTimeline(inc)
+          if (timeline) existingDetail.timeline = mergeCompactTimelines(existingDetail.timeline, timeline)
           // KNOWN LIMIT, two parts. `data.dates` was banked from the FIRST shape's `incidentDay(inc)`
           // and is not revisited, so a flip crossing a UTC day leaves the banked date stale. And a flip
           // crossing a MONTH never reaches this block at all — the period filter above drops the
@@ -878,6 +910,7 @@ export function accumulateMonthlyIncidents(
       data.count++
       data.totalMinutes += dur
       if (dur > data.longestMinutes) data.longestMinutes = dur
+      const timeline = compactTimeline(inc)
       data.incidents.push({
         id: inc.id,
         title: inc.title,
@@ -892,6 +925,7 @@ export function accumulateMonthlyIncidents(
         ...(inc.zeroLengthRecord ? { zeroLengthRecord: true } : {}), // #1480 — so it is not told the #1390 story on read
         ...(inc.crossEventKey ? { crossEventKey: inc.crossEventKey } : {}), // #1859
         ...(inc.keptAfterComponentRecovery ? { keptAfterComponentRecovery: true as const } : {}),
+        ...(timeline ? { timeline } : {}),
       })
 
       const date = incidentDay(inc)

@@ -24,7 +24,8 @@ const SERVICES_SRC = new URL('../services.ts', import.meta.url)
  *      phantom-prune counter), and it is already the trust boundary for public emission. Reading it
  *      here rather than restating it is what stops this test and that function disagreeing.
  *    - minus whatever the forwarder already assigns by name (`impact`), which is carried, just not
- *      through the shared tag object. */
+ *      through the shared tag object.
+ *    - minus `timeline`, which the bridge sets to `[]` on purpose (#2033). */
 function declaredTags(): string[] {
   const src = readFileSync(ARCHIVE_SRC, 'utf-8')
   const body = src.slice(src.indexOf('export interface MonthlyIncidentEntry'))
@@ -40,6 +41,7 @@ function declaredTags(): string[] {
   const merge = fwd.slice(fwd.indexOf('function recordedEntryToIncident'))
   const mergeBody = merge.slice(0, merge.indexOf('\n}\n'))
   const explicit = new Set(declared.filter((f) => new RegExp(`^\\s*${f}:\\s*entry\\.${f}\\b`, 'm').test(mergeBody)))
+  explicit.add('timeline')
 
   return declared.filter((f) => !internal.has(f) && !explicit.has(f))
 }
@@ -70,12 +72,14 @@ describe('#1390 — every qualifying tag survives the archive → live round tri
       autoMonitor: true, derived: 'status_history', derivedDay: '2026-09-05', startUnknown: true,
       zeroLengthRecord: true, crossEventKey: 'xai:53g239', keptAfterComponentRecovery: true,
       missedRuns: 2, // internal bookkeeping — must NOT reach the live incident
+      timeline: [{ at: '2026-09-05T07:09:00Z', stage: 'resolved', text: 'Resolved' }],
     } as unknown as MonthlyIncidentEntry
     const [out] = mergeRetainedIncidentHistory([], [entry], '2026-01-01T00:00:00Z')
     for (const t of tags) {
       expect((out as unknown as Record<string, unknown>)[t], `${t} was dropped by mergeRetainedIncidentHistory`).toBeTruthy()
     }
     expect(out.retainedBridge, 'the bridge still stamps its own tag').toBe(true)
+    expect(out.timeline, '#2033 — the stored compact timeline is not shown on a bridged incident').toEqual([])
     expect((out as unknown as Record<string, unknown>).missedRuns, 'accumulator bookkeeping must not ride back onto a live incident').toBeUndefined()
   })
 
