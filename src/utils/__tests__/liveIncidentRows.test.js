@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { unfilteredIncidentRows } from '../liveIncidentRows'
+import { unfilteredIncidentRows, unresolvedIncidentCount } from '../liveIncidentRows'
 
 const rowsOf = (services, archives = {}, months = []) => unfilteredIncidentRows(services, archives, months, (r) => r)
 
@@ -118,5 +118,37 @@ describe('unfilteredIncidentRows (#1338)', () => {
     ])
     expect(row.id).toBe('claude:461yvfrzpwtt')
     expect(row.status).toBe('resolved')
+  })
+})
+
+// #2027
+describe('unresolvedIncidentCount (#2027)', () => {
+  const live = (id, status, extra = {}) => ({ id, title: id, status, impact: 'minor', startedAt: '2026-11-18T01:00:00.000Z', resolvedAt: null, ...extra })
+  const costs = { id: '01M7N9VNR6X5SEC90M1YCDB36D', title: 'Costs API data is delayed', status: 'monitoring', impact: 'minor', startedAt: '2026-11-17T17:46:15Z', resolvedAt: null, componentNames: ['Compliance API'] }
+
+  // The payload of #2027: two service incidents and the Costs API delay as a reference incident under two services.
+  const observed = [
+    { id: 'bfl', name: 'FLUX', provider: 'Black Forest Labs', incidents: [live('237sqzlpytzg', 'monitoring')] },
+    { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', incidents: [live('b5cq662qf2wm', 'identified')] },
+    { id: 'openai', name: 'OpenAI', provider: 'OpenAI', incidents: [], referenceIncidents: [costs] },
+    { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', incidents: [], referenceIncidents: [costs] },
+  ]
+
+  it('counts the reference incident the page lists, once although two services carry it', () => {
+    expect(unresolvedIncidentCount(observed)).toBe(3)
+  })
+
+  it('a resolved reference incident and a resolved live incident are not counted', () => {
+    const svcs = [
+      { id: 'a', name: 'A', provider: 'A', incidents: [live('r1', 'resolved', { resolvedAt: '2026-11-18T02:00:00.000Z' })], referenceIncidents: [{ ...costs, id: 'ref-done', status: 'resolved' }] },
+    ]
+    expect(unresolvedIncidentCount(svcs)).toBe(0)
+  })
+
+  it('two open incidents of one xAI event on two cards are ONE row, as on the page', () => {
+    const open = (inc) => ({ ...inc, status: 'investigating', resolvedAt: null })
+    const svcs = [xai([open(API)]), grok([open(GROK)])]
+    expect(rowsOf(svcs).filter((r) => r.status !== 'resolved')).toHaveLength(1)
+    expect(unresolvedIncidentCount(svcs)).toBe(1)
   })
 })

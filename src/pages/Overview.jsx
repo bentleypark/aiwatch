@@ -29,7 +29,7 @@ import EmptyState from '../components/EmptyState'
 import { showRecoveredChip } from '../utils/liveIncident'
 import { rankedByLatency } from '../utils/latencyRanking'
 import { latencyCardState, overviewLatencyCell, latestProbeData } from '../utils/latencyCard'
-import { mergeReferenceRows } from '../utils/referenceIncidents'
+import { mergeReferenceRows, openReferenceRows } from '../utils/referenceIncidents'
 import { buildAffectedEntries, hasPopoverApi, isEntryExpandable, issueSort, otherOpenIncidentsOf } from '../utils/affectedServices'
 import { sharedUpstreamGroups } from '../../worker/src/shared-upstream'
 import { rowHighlight } from '../utils/rowHighlight'
@@ -604,6 +604,42 @@ function AffectedEntry({ entry, lang, t, onSelect }) {
   )
 }
 
+// #2027 — an open reference incident under "Affected now": the entry header and timeline, no members.
+function ReferenceEntry({ row, lang, t }) {
+  const expandable = isEntryExpandable({ incident: row })
+  const stateLabel = row.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing')
+  return (
+    <li
+      data-testid="affected-reference-entry"
+      className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg"
+      style={{ borderLeft: '3px solid var(--border-hi)', padding: '10px 12px' }}
+    >
+      <ExpandableDetail
+        expandable={expandable}
+        layoutClass="block"
+        style={{ padding: '2px 4px', margin: '-2px -4px' }}
+        testIds={{ header: 'affected-reference-header', panel: 'affected-reference-panel' }}
+        t={t}
+        renderHeader={({ expanded, titleId }) => (
+          <>
+            <span className="flex items-start justify-between gap-2">
+              <span id={titleId} className="text-[12px] font-medium text-[var(--text0)]">{row.title}</span>
+              {expandable && <span aria-hidden="true" className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>}
+            </span>
+            <span className="block mono text-[10px] text-[var(--text2)]">
+              {row.serviceName}
+              {' · '}{t('incidents.time.started')} {formatDate(row.startedAt, lang, { dayOnly: row.derived === 'status_history', day: row.derivedDay })}
+              {' · '}{stateLabel}
+            </span>
+          </>
+        )}
+      >
+        <IncidentTimeline title={row.title} timeline={row.timeline} hideHeader t={t} lang={lang} />
+      </ExpandableDetail>
+    </li>
+  )
+}
+
 // Latency bar with colored fill per speed tier
 function LatencyBar({ service, maxLatency }) {
   const widthPct = maxLatency > 0 ? Math.round((service.latency / maxLatency) * 100) : 0
@@ -691,6 +727,7 @@ export function ActionBanner({ services, setPage, t, lang }) {
   if (affected.length === 0 && withActiveIncidents.length === 0) return null
 
   const entries = buildAffectedEntries(services)
+  const referenceRows = openReferenceRows(services)
   const selectService = (svc) => { trackEvent('select_service', { service_id: svc.id, location: 'affected_now' }); setPage({ name: 'service', serviceId: svc.id }) }
   const downList = affected.filter(s => displayStatusOf(s) === 'down')
   const degradedList = affected.filter(s => displayStatusOf(s) === 'degraded')
@@ -887,6 +924,16 @@ export function ActionBanner({ services, setPage, t, lang }) {
         <ul role="list" className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '8px', marginTop: '10px' }}>
           {entries.map((entry) => <AffectedEntry key={entry.key} entry={entry} lang={lang} t={t} onSelect={selectService} />)}
         </ul>
+      )}
+      {referenceRows.length > 0 && (
+        <div data-testid="affected-reference" style={{ marginTop: '10px' }}>
+          <span id="affected-reference-label" className="mono text-[10px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em' }}>
+            {t('overview.affected.reference')}
+          </span>
+          <ul role="list" aria-labelledby="affected-reference-label" className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '8px', marginTop: '6px' }}>
+            {referenceRows.map((r) => <ReferenceEntry key={r.id} row={r} lang={lang} t={t} />)}
+          </ul>
+        </div>
       )}
     </div>
   )

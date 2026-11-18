@@ -86,6 +86,7 @@ const ko = {
   'overview.affected.scope': '전체 카테고리',
   'overview.affected.members': '{n}개 서비스',
   'overview.affected.alsoOpen': '함께 진행 중',
+  'overview.affected.reference': '참고 인시던트',
   'overview.affected.down': '중단 {n}',
   'overview.affected.degraded': '성능 저하 {n}',
   'overview.banner.degraded': '성능 저하',

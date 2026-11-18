@@ -12,7 +12,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { incidentNote } from '../utils/incidentNote'
 import { getResolvedTime, getContextualTime, compareGroupedRows, dominantGroupStatus, sumGroupDuration, groupDurationText, incidentDurationText, incidentDisplayStatus } from '../utils/incidentSort'
 import { archiveMonthsForPeriod, archiveSupplementForService } from '../utils/archiveMerge'
-import { referenceIncidentRows } from '../utils/referenceIncidents'
+import { referenceIncidentRows, toReferenceRow } from '../utils/referenceIncidents'
 import { toLiveRow, unfilteredIncidentRows } from '../utils/liveIncidentRows'
 import { filterIncidentList } from '../utils/incidentFilter'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
@@ -23,11 +23,6 @@ import { trackEvent } from '../utils/analytics'
 import { INCIDENT_PERIODS } from '../utils/hashRoute'
 import { NO_SERVICES } from '../utils/constants'
 import { rowHighlight } from '../utils/rowHighlight'
-
-const toReferenceRow = (r) => ({
-  ...r,
-  status: r.status === 'resolved' ? 'resolved' : r.status === 'monitoring' ? 'monitoring' : 'ongoing',
-})
 
 // ── Constants ────────────────────────────────────────────────
 

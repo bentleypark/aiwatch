@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { referenceIncidentRows, mergeReferenceRows } from '../referenceIncidents'
+import { referenceIncidentRows, mergeReferenceRows, openReferenceRows } from '../referenceIncidents'
 import { filterIncidentList } from '../incidentFilter'
 
 const CONSOLE = 'Claude Console (platform.claude.com)'
@@ -50,4 +50,41 @@ describe('mergeReferenceRows (#1669)', () => {
     mergeReferenceRows(map, [claude])
     expect(map.get('978mjkgw6mh7')).toBe(live)
   })
+})
+
+// #2027
+describe('openReferenceRows (#2027)', () => {
+  const costs = { id: '01M7N9VNR6X5SEC90M1YCDB36D', title: 'Costs API data is delayed', status: 'monitoring', startedAt: '2026-11-17T17:46:15Z', componentNames: ['Compliance API'] }
+  const svc = (id, provider, refs) => ({ id, name: id, provider, incidents: [], referenceIncidents: refs })
+
+  it('lists an incident carried by two services once, labelled provider · component', () => {
+    const rows = openReferenceRows([svc('openai', 'OpenAI', [costs]), svc('chatgpt', 'OpenAI', [costs])])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].serviceName).toBe('OpenAI · Compliance API')
+  })
+
+  it('drops resolved incidents and maps a live status to `ongoing`, as the Incidents page shows it', () => {
+    const rows = openReferenceRows([svc('a', 'A', [
+      { ...costs, id: 'done', status: 'resolved' },
+      { ...costs, id: 'live', status: 'identified' },
+      costs,
+    ])])
+    expect(rows.map((r) => [r.id, r.status])).toEqual([['live', 'ongoing'], [costs.id, 'monitoring']])
+  })
+
+  // Local worker, #2027: one id was a service incident on `openai` and a reference incident on `chatgpt`.
+  it('leaves out an id some service already counts as its own incident', () => {
+    const counted = { id: costs.id, title: costs.title, status: 'monitoring', startedAt: costs.startedAt }
+    const rows = openReferenceRows([
+      { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', incidents: [counted] },
+      svc('chatgpt', 'OpenAI', [costs]),
+      svc('other', 'Other', [{ ...costs, id: 'only-ref' }]),
+    ])
+    expect(rows.map((r) => r.id)).toEqual(['only-ref'])
+  })
+
+  it('is empty without reference incidents, and a malformed field does not throw', () => {
+    expect(openReferenceRows([])).toEqual([])
+    expect(openReferenceRows(undefined)).toEqual([])
+    expect(openReferenceRows([{ id: 'x', name: 'X', referenceIncidents: null }])).toEqual([])  })
 })

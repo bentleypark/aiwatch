@@ -9,6 +9,7 @@ import { trackEvent } from '../utils/analytics'
 import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL, categoryRankOf } from '../utils/constants'
 import { isUnreliableUptime } from '../utils/serviceReliability'
 import { displayStatusOf, isDisplayAffected } from '../utils/statusDisplay'
+import { unresolvedIncidentCount } from '../utils/liveIncidentRows'
 import RssCopyIcon from './RssCopyIcon'
 import SlackInstallLink from './SlackInstallLink'
 
@@ -199,17 +200,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   const orderedServices = [...categoryServices].sort((a, b) => categoryRankOf(a.id) - categoryRankOf(b.id))
 
   const issueCount = useMemo(() => services.filter(isDisplayAffected).length, [services])
-  // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
-  const incidentCount = useMemo(() => {
-    const seen = new Set()
-    return services.reduce((sum, s) =>
-      sum + (s.incidents ?? []).filter((inc) => {
-        if (seen.has(inc.id)) return false
-        seen.add(inc.id)
-        return inc.status !== 'resolved'
-      }).length
-    , 0)
-  }, [services])
+  const incidentCount = useMemo(() => unresolvedIncidentCount(services), [services])
 
   // h-full only from md up. Pinning the height at every breakpoint made the content exactly fill the
   // mobile drawer, so the drawer's own overflow-y-auto never engaged (#978). Below md the content
