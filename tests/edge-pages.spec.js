@@ -60,6 +60,9 @@ test.describe('no CSP violation on load (#2026)', () => {
       test(`${path} with consent ${consent}`, async ({ page, baseURL }) => {
         test.skip(path === '/' && /localhost/.test(baseURL), '`vercel dev` answers / with a 307 to itself; the Preview run checks it')
         if (consent) await page.addInitScript((c) => localStorage.setItem('aiwatch-cookie-consent', c), consent)
+        const origin = new URL(baseURL).origin
+        await page.route((u) => u.origin === origin, async (route) =>
+          route.continue({ headers: { ...(await route.request().allHeaders()), 'x-vercel-skip-toolbar': '1' } }))
         const violations = []
         page.on('console', (m) => {
           if (/Content Security Policy/.test(m.text())) violations.push(m.text())

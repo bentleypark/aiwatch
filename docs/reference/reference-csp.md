@@ -62,7 +62,7 @@ report-uri /api/csp-report; report-to csp
   logged-out viewer to `accounts.kakao.com`, and form-action is checked on every redirect (#1619); the **Worker origin** in connect (`/api/*`
   fetches) AND img (the status/uptime **badges** on ServiceDetails load from `<worker>/badge/<id>` — #482
   review); Google Fonts `fonts.googleapis.com` (stylesheet) in style, `fonts.gstatic.com` (files) in font;
-  `ai-watch.dev` (OG images, icons) + `data:` in img. The many `status.*` provider origins are *server-side
+  `ai-watch.dev` (OG images, icons) + `data:` in img; `www.googletagmanager.com` + `*.google-analytics.com` (gtag.js image pings, #2026) in img. The many `status.*` provider origins are *server-side
   Worker fetches*, not browser loads — correctly excluded.
 
 ### Reviewing violations
