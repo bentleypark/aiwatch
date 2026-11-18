@@ -465,6 +465,12 @@ export interface ServiceConfig {
   // component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
+  // Instatus ONLY (read inside fetchService's `instatusUrl` branch; inert elsewhere). The card's
+  // uptime is the worst of the whole `displayComponentIds` set instead of the one `statusComponent`,
+  // so it moves when any component the incident scope covers has an outage. Set it with an
+  // `incidentComponents` allowlist over the same components: wide incidents with narrow uptime is
+  // "an incident listed, uptime unaffected". Off by default, so `fal` keeps its single-component card.
+  uptimeOverDisplayComponents?: boolean
   // Per-component-id → group label, mirroring the OFFICIAL status page's component groups.
   // Applied in both breakdown paths: a matched component whose id is
   // present is tagged `group: <label>` so the UI collapses same-label components under one

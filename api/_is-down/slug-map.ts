@@ -63,6 +63,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api', group: 'inference' },
   // Twelve Labs (#839) — video-understanding API (search/embed/analyze), not video generation. Slug == worker id.
   'twelvelabs':      { id: 'twelvelabs', name: 'Twelve Labs',      provider: 'Twelve Labs', category: 'api', group: 'inference' },
+  'lyceum':          { id: 'lyceum',     name: 'Lyceum',           provider: 'Lyceum',      category: 'api', group: 'inference' },
   // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
   // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
@@ -141,6 +142,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'jina':           ['voyageai', 'pinecone', 'cohere'], // #880
   'modal':          ['replicate', 'huggingface'],
   'twelvelabs':     ['replicate', 'huggingface', 'runway', 'luma'],
+  'lyceum':         ['huggingface', 'replicate', 'fal', 'modal'],
   'langchain':      ['helicone', 'langfuse'],
   'helicone':       ['langchain', 'langfuse'],
   'langfuse':       ['langchain', 'helicone'],
@@ -193,7 +195,7 @@ export const FAMILY_GROUPS: Record<string, ServiceFamily> = {
 // (unpaid editorial; `sponsored` would falsely mark it paid) and rankings stay Score-only. Kept
 // byte-identical to the SPA mirror in src/utils/constants.js (pinned by service-site-url-sync test).
 // EXCLUDE_FALLBACK services (replicate/huggingface/fal/modal/characterai/bedrock/azureopenai/
-// twelvelabs) are intentionally absent — they never appear as a fallback candidate.
+// twelvelabs/lyceum) are intentionally absent — they never appear as a fallback candidate.
 export const SERVICE_SITE_URL: Record<string, string> = {
   // LLM APIs
   claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',

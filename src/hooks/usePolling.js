@@ -483,6 +483,13 @@ export const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'lyceum', category: 'api', name: 'Lyceum', provider: 'Lyceum', status: 'operational',
+    latency: null, uptime30d: null, // #802 — newly added, no uptime data yet
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'langsmith', category: 'api', name: 'LangChain (LangSmith)', provider: 'LangChain', status: 'operational',
     latency: null, uptime30d: 98.48,
     history30d: hist([9, 18]),

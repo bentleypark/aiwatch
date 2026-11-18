@@ -34,6 +34,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
   { id: 'jina', url: 'https://api.jina.ai/v1/embeddings' },                       // #880 — app 401 (unknown /v1 path 404s), same path as voyageai
   { id: 'twelvelabs', url: 'https://api.twelvelabs.io/v1.3/indexes' },             // control-plane, 401
+  { id: 'lyceum', url: 'https://api.lyceum.technology/openai/v1/models' },         // #1979 — the API's own 401 (unknown /openai path 404, root 200)
   // #678 — added after a live cross-check showed these have a stable, representative API path that
   // returns a fast status without auth (the probe measures RTT and treats ANY HTTP response as
   // "server alive", so the old "requires auth" exclusions were invalid):

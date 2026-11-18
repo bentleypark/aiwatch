@@ -553,10 +553,27 @@ export interface InstatusUptime {
 
 export function parseInstatusUptime(
   html: string,
-  componentName: string | undefined,
+  componentName: string | string[] | undefined,
   nowMs: number = Date.now(),
   windowDays = 30,
 ): InstatusUptime | null {
+  // A multi-component scope is the worst of its components (the badge's #379 convention);
+  // `todayWeightedOutageSec` worst-of's independently of `pct`. A member with no figure is skipped
+  // with a warning, since a partial scope can only look better than the card claims.
+  if (Array.isArray(componentName)) {
+    let worst: InstatusUptime | null = null
+    const unresolved: string[] = []
+    for (const name of componentName) {
+      const one = parseInstatusUptime(html, name, nowMs, windowDays)
+      if (one === null) { unresolved.push(name); continue }
+      worst = worst === null ? one : {
+        pct: Math.min(worst.pct, one.pct),
+        todayWeightedOutageSec: Math.max(worst.todayWeightedOutageSec, one.todayWeightedOutageSec),
+      }
+    }
+    if (worst !== null && unresolved.length > 0) warnPartialUptimeScope(componentName, unresolved)
+    return worst
+  }
   if (!componentName) return null
   if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName, nowMs, windowDays)
   if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName, nowMs, windowDays)
@@ -665,6 +682,15 @@ function instatusSeverityWeight(severity: string): number {
  *  makes the second test in a file silent). */
 export function __resetInstatusUptimeWarnings(): void {
   warnedInstatusNextUptime.clear()
+  warnedPartialUptimeScope.clear()
+}
+
+const warnedPartialUptimeScope = new Set<string>()
+function warnPartialUptimeScope(scope: string[], unresolved: string[]): void {
+  const key = `${scope.join('|')}→${unresolved.join('|')}`
+  if (warnedPartialUptimeScope.has(key)) return
+  warnedPartialUptimeScope.add(key)
+  console.warn(`[parseInstatusUptime] PARTIAL uptime scope: ${unresolved.join(', ')} of [${scope.join(', ')}] yielded no uptime — the published figure covers only the remaining components`)
 }
 
 const warnedInstatusNextUptime = new Set<string>()

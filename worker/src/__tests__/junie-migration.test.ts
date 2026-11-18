@@ -88,10 +88,14 @@ describe('every service points its status URLs at ONE host', () => {
 // #1004 — the SPA's "Status Page ↗" link hand-mirrors `statusUrl`. This migration had to update both by
 // hand; nothing failed if it hadn't, and the link would have pointed at a 301'd host indefinitely.
 describe('src/utils/statusPageUrls.js mirrors the worker config', () => {
-  // Pre-existing divergences, pinned so a NEW one can't slip in silently. These are the human-facing
-  // page for a provider whose MACHINE endpoint lives elsewhere; not verified as intentional — if one
-  // turns out to be a typo, fix it and delete the entry here.
-  const KNOWN_DIVERGENT = new Set(['cohere', 'groq', 'perplexity'])
+  // Divergences, pinned so a NEW one can't slip in silently. UNVERIFIED are the human-facing page for a
+  // provider whose MACHINE endpoint lives elsewhere, not verified as intentional — if one turns out to be
+  // a typo, fix it and delete the entry here. VERIFIED were checked against the provider's own pages when
+  // they were added (lyceum, #1979: its site and docs link status.lyceum.technology, a front end that
+  // reads the Instatus page `statusUrl` parses).
+  const UNVERIFIED_DIVERGENT = ['cohere', 'groq', 'perplexity']
+  const VERIFIED_DIVERGENT: Record<string, string> = { lyceum: 'https://status.lyceum.technology' }
+  const KNOWN_DIVERGENT = new Set([...UNVERIFIED_DIVERGENT, ...Object.keys(VERIFIED_DIVERGENT)])
 
   it('every service id resolves to the same status URL on both sides', () => {
     const drift = SERVICES
@@ -99,6 +103,13 @@ describe('src/utils/statusPageUrls.js mirrors the worker config', () => {
       .filter((s) => STATUS_URL[s.id as keyof typeof STATUS_URL] !== s.statusUrl)
       .map((s) => `${s.id}: ui=${STATUS_URL[s.id as keyof typeof STATUS_URL]} worker=${s.statusUrl}`)
     expect(drift).toEqual([])
+  })
+
+  it('a verified divergence holds the exact link the provider publishes', () => {
+    for (const [id, url] of Object.entries(VERIFIED_DIVERGENT)) {
+      expect(STATUS_URL[id as keyof typeof STATUS_URL], id).toBe(url)
+      expect(SERVICES.find((s) => s.id === id)!.statusUrl, `${id}: not a divergence any more`).not.toBe(url)
+    }
   })
 
   it('has an entry for every service, and no stale ones', () => {

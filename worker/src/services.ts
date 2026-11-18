@@ -444,6 +444,15 @@ export const SERVICES: ServiceConfig[] = [
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
   { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', statusComponentIds: ['mvv53x91b74m', '28vf3d4r3tjg'], referenceComponentIds: ['29c68cnyd14l', '20930d4nz774'], rosterAuditExclude: ['blny8xq0yq7p', '29c68cnyd14l', '20930d4nz774'], displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', 'j21c5rdfj8kf', '91lzwtn6071h', 'p1hx7t867896', '3ng4ddpvmv3r', '12vp1vm9smc2', 'qkmbnw1n5mgh', 'j86pqszy5w90', '27kd6568skjp', '3pksbw640gn9', 'rgbmm56z696d', 'sjbv0n38bs7n', 'cns848tdzn22', 'jzy4m39608m3'], componentGroups: { 'mrclkkqtj01j': 'APIs', '2zsl201s8df5': 'APIs', 'jnvb5r3v74q1': 'APIs', '751304vy1s9x': 'APIs', 'hr353rqqmwmk': 'APIs', 'yklrkrhkd1by': 'APIs', '3t1cjx55dyrf': 'APIs', 'j21c5rdfj8kf': 'APIs', '91lzwtn6071h': 'APIs', 'p1hx7t867896': 'APIs', '3ng4ddpvmv3r': 'APIs', '12vp1vm9smc2': 'APIs', 'qkmbnw1n5mgh': 'APIs', 'j86pqszy5w90': 'Jockey', '27kd6568skjp': 'Jockey', '3pksbw640gn9': 'Jockey', 'rgbmm56z696d': 'Jockey', 'sjbv0n38bs7n': 'Jockey', 'cns848tdzn22': 'Jockey', 'jzy4m39608m3': 'Jockey' }, autoMonitorTitles: [/^Some (?:Jockey )?API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
+  // Lyceum (#1979) — inference provider on an Instatus (Next.js) page, `caspar.instatus.com`; its own
+  // `status.lyceum.technology` is a front end that reads that page's summary.json, so `statusUrl` stays
+  // on the page whose HTML carries the components and uptime. The card counts the inference API only:
+  // Model Inference, Serverless Inference API, API Gateway. Dashboard, Website and Docs are not
+  // counted (the Instatus path carries no reference components). `incidentComponents` is an exact-name
+  // allowlist — `incidentKeywords: ['api']` would drop Model Inference incidents — and
+  // `uptimeOverDisplayComponents` makes the uptime the worst of the same three. `statusComponent` is
+  // only the fallback for a cycle where no displayComponentIds resolves.
+  { id: 'lyceum', name: 'Lyceum', provider: 'Lyceum', category: 'api', statusUrl: 'https://caspar.instatus.com', apiUrl: null, instatusUrl: 'https://caspar.instatus.com', incidentComponents: ['Model Inference', 'Serverless Inference API', 'API Gateway'], statusComponent: 'Model Inference', displayComponentIds: ['cmsro18m100690zpmoooevk79', 'cmrjn3yjw02pv1bo2ap0pac7p', 'cmrjfshxl01bv0ko2mmt64j4e'], uptimeOverDisplayComponents: true, addedAt: '2026-11-13' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
   // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
   // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
@@ -1576,6 +1585,28 @@ export function referenceIncidentsOf(
     const taggedIds = inc.componentIds ?? []
     return taggedIds.length > 0 && taggedIds.every((id) => nameOf.has(id))
   }).map((inc) => (inc.componentNames?.length ? inc : { ...inc, componentNames: inc.componentIds!.map((id) => nameOf.get(id)!) }))
+}
+
+/** The component name(s) an Instatus card's uptime is read from: the single `statusComponent`, or with
+ *  `uptimeOverDisplayComponents` the names of the `displayComponentIds` found on this page's own
+ *  component list. No id resolving (or no set to widen to) falls back to `statusComponent` and warns. */
+export function instatusUptimeScope(
+  config: Pick<ServiceConfig, 'id' | 'statusComponent' | 'displayComponentIds' | 'uptimeOverDisplayComponents'>,
+  pageComponents: ReadonlyArray<{ id: string; name: string }>,
+): string | string[] | undefined {
+  if (!config.uptimeOverDisplayComponents) return config.statusComponent
+  if (!config.displayComponentIds?.length) {
+    console.warn(`[fetchService] ${config.id} sets uptimeOverDisplayComponents but has no displayComponentIds — uptime stays on statusComponent "${config.statusComponent}"`)
+    return config.statusComponent
+  }
+  const names = config.displayComponentIds
+    .map((id) => pageComponents.find((c) => c.id === id)?.name)
+    .filter((n): n is string => !!n)
+  if (names.length > 0) return names
+  console.warn(config.statusComponent
+    ? `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name — falling back to statusComponent "${config.statusComponent}"`
+    : `[fetchService] ${config.id} uptimeOverDisplayComponents: no displayComponentIds resolved to a component name and no statusComponent is set — NO uptime this cycle`)
+  return config.statusComponent
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -3653,20 +3684,18 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
         if (res.ok) {
           const mainHtml = await res.text()
           const instatusComps = parseInstatusComponents(mainHtml)
-          // The uptime SCOPE is the single `statusComponent`. #1177 once widened it to the whole
-          // `displayComponentIds` set for perplexity (`uptimeOverDisplayComponents`); #1390 moved
-          // perplexity to incident.io, where `statusComponentIds` expresses that same scope, leaving
-          // `fal` — a deliberately single-component API-surface card — as the only Instatus service.
-          // The flag, its multi-name parser branch and their tests were deleted with it rather than
-          // left as a config path no service takes.
-          if (config.statusComponent) {
-            const instatusResult = parseInstatusUptime(mainHtml, config.statusComponent)
+          const uptimeScope = instatusUptimeScope(config, instatusComps)
+          if (uptimeScope) {
+            const instatusResult = parseInstatusUptime(mainHtml, uptimeScope)
             instatusUptime = instatusResult?.pct ?? null
             instatusTodayWeightedOutageSec = instatusResult?.todayWeightedOutageSec ?? null // #1017
             // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
-            // disclosure. Only kept when it differs from our computed figure.
-            instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
-            instatusReportedDays = parseInstatusUptimeDays(mainHtml)
+            // disclosure. Only kept when it differs from our computed figure. Withheld for a
+            // multi-component scope: the page publishes one figure per component, never one for the set.
+            if (typeof uptimeScope === 'string') {
+              instatusReported = parseInstatusReportedUptime(mainHtml, uptimeScope)
+              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
+            }
           }
           if (instatusComps.length > 0) {
             instatusComponents = resolveSvcComponents(config, { components: instatusComps })

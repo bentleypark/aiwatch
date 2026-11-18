@@ -124,6 +124,7 @@ Grouped by the dashboard's category taxonomy (sidebar filters / Overview section
 | Jina AI | Jina AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
 | Twelve Labs | Twelve Labs | Atlassian Statuspage |
+| Lyceum | Lyceum | Instatus (Next.js) |
 
 ### Observability
 
@@ -358,6 +359,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
 | `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
+| `lyceum` | Lyceum | | |
 
 ## Claude Code Statusline Integration
 

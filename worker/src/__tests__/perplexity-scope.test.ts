@@ -106,14 +106,6 @@ describe('#1177 scope decision — carried across the platform change, not revis
     expect(fal.incidentKeywords).toEqual(['api'])
     expect(fal.statusComponent).toBe('API')
   })
-
-  it('fal is now the ONLY Instatus service', () => {
-    // Why `uptimeOverDisplayComponents` (and `parseInstatusUptime`'s multi-name branch) went with this
-    // migration: perplexity was the flag's only user, and the one remaining Instatus card is
-    // single-component by decision. A second Instatus service arriving is the moment to re-derive that,
-    // rather than inheriting a config path no service takes.
-    expect(SERVICES.filter((s) => s.instatusUrl).map((s) => s.id)).toEqual(['fal'])
-  })
 })
 
 function inc(overrides: Partial<Incident> = {}): Incident {
