@@ -32,7 +32,7 @@ export const config = { runtime: 'edge' }
 // reports.ai-watch.dev — the fetch's `redirect: 'follow'` (below) is what
 // keeps the proxy working in that interim. Don't change it to 'manual' or
 // 'error' without first verifying the CNAME has been removed.
-const UPSTREAM_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
+export const UPSTREAM_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
 
 // #378: notify the Worker when the proxy serves the fallback so an operator Discord alert fires.
 // Worker dedups via 5-min KV.

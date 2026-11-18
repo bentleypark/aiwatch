@@ -1,13 +1,14 @@
 // #1711 — the latest PUBLISHED monthly report, summarised for the Claude extension popup.
 //
 // The archive (`archive:monthly:{YYYY-MM}`) is built on the 1st, but the report page is published
-// later by hand, so a month is only offered once `ai-watch.dev/reports/{YYYY-MM}/` answers 200.
+// later by hand, so a month is only offered once its GitHub Pages origin page answers 200 (#2022).
 
 import type { KVLike } from './utils'
 import { kvPut, fetchWithTimeout } from './utils'
 
 export const LATEST_REPORT_KEY = 'report:latest-summary'
 export const REPORT_SITE = 'https://ai-watch.dev/reports'
+export const REPORT_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
 
 export interface LatestReportSummary {
   month: string
@@ -94,7 +95,7 @@ export async function refreshLatestReportSummary(
   }
   for (const month of reportCandidates(now)) {
     if (stored?.month === month) return 'current'
-    const published = await isPublished(reportUrl(month))
+    const published = await isPublished(`${REPORT_ORIGIN}/${month}/`)
     if (published === null) return 'unreadable'
     if (!published) continue
     let archive: unknown

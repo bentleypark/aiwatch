@@ -66,6 +66,17 @@ describe('refreshLatestReportSummary', () => {
     expect(JSON.parse(kv._store.get(LATEST_REPORT_KEY)!).month).toBe('2026-08')
   })
 
+  it('checks publication on the GitHub Pages origin, not through the ai-watch.dev proxy, and still links the summary to ai-watch.dev (#2022)', async () => {
+    const kv = makeKV({ 'archive:monthly:2026-09': archive(9), 'archive:monthly:2026-08': archive(18) })
+    const check = vi.fn(published(['2026-08']))
+    expect(await refreshLatestReportSummary(kv, NOW, IDS, check)).toBe('written')
+    expect(check.mock.calls.map(([u]) => u)).toEqual([
+      'https://bentleypark.github.io/aiwatch-reports/2026-09/',
+      'https://bentleypark.github.io/aiwatch-reports/2026-08/',
+    ])
+    expect(JSON.parse(kv._store.get(LATEST_REPORT_KEY)!).url).toBe('https://ai-watch.dev/reports/2026-08/')
+  })
+
   it('moves to the new month once it is published', async () => {
     const kv = makeKV({ 'archive:monthly:2026-09': archive(9), [LATEST_REPORT_KEY]: stored('2026-08') })
     expect(await refreshLatestReportSummary(kv, NOW, IDS, published(['2026-09', '2026-08']))).toBe('written')
