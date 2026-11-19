@@ -146,7 +146,7 @@ test('npm run test:scripts still runs every scripts/*.test.mjs, unconditionally'
   // Exact equality, not a substring match: `node --test scripts/*.test.mjs || true` contains the glob
   // and disarms the entire suite.
   const pkg = JSON.parse(read('package.json'))
-  assert.equal(pkg.scripts['test:scripts'], 'node --test scripts/*.test.mjs')
+  assert.equal(pkg.scripts['test:scripts'], 'node --test scripts/*.test.mjs && node --import tsx --test scripts/*.test.ts')
 })
 
 // --- the SHIPPED binary, executed --------------------------------------------------------------

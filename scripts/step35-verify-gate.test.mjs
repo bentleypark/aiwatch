@@ -1,5 +1,5 @@
 // #657 — unit tests for the hard-deny step-3.5 gate's pure decision logic. Run with
-// `npm run test:scripts` (= `node --test scripts/*.test.mjs`). The CLI/IO (transcript read, git diff,
+// `npm run test:scripts`. The CLI/IO (transcript read, git diff,
 // deny JSON) is covered by the artifact check in the PR; here we pin the unfabricable-signal logic.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

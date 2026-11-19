@@ -1,5 +1,5 @@
 // #862 — regression guard for the Vercel Hobby-plan 12-Serverless-Function limit.
-// Run with `npm run test:scripts` (= `node --test scripts/*.test.mjs`), which CI runs in test.yml.
+// Run with `npm run test:scripts`, which CI runs in test.yml.
 // Pins BOTH the pure counting rule (fixtures) AND the real `api/` tree (must stay ≤ 12).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
