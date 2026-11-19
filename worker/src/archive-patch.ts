@@ -431,6 +431,70 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
       impact: 'minor',
     }],
   },
+  '2026-10-openai-impact-start': {
+    period: '2026-10',
+    service: 'openai',
+    source: 'https://status.openai.com status-page component_impacts read 2026-11-19: each impact window opens before the post the archived start came from (#2044)',
+    remove: ['01M48Y8E81QAFF9XKVGE118E6X'],
+    add: [{
+      id: '01M48Y8E81QAFF9XKVGE118E6X',
+      title: 'Errors processing large PDFs in the Responses API',
+      startedAt: '2026-10-06T05:00:00.000Z',
+      resolvedAt: '2026-10-06T17:50:00.000Z',
+      impact: 'minor',
+    }],
+  },
+  '2026-10-chatgpt-impact-start': {
+    period: '2026-10',
+    service: 'chatgpt',
+    source: 'https://status.openai.com status-page component_impacts read 2026-11-19: each impact window opens before the post the archived start came from (#2044)',
+    remove: ['01M506BA4XRSWH7THR53HQGN3Z'],
+    add: [{
+      id: '01M506BA4XRSWH7THR53HQGN3Z',
+      title: 'Widespread feature degradation',
+      startedAt: '2026-10-15T14:30:00.000Z',
+      resolvedAt: '2026-10-15T18:56:00.000Z',
+      impact: 'major',
+    }],
+  },
+  '2026-10-langfuse-impact-start': {
+    period: '2026-10',
+    service: 'langfuse',
+    source: 'https://status.langfuse.com status-page component_impacts read 2026-11-19: each impact window opens before the post the archived start came from (#2044)',
+    remove: ['01M5D0AE6TJDT4W664FE4AABET', '01M5EPTJX79TDVMB07KQV902HH', '01M59SQX711PHWS3C697ZQN8NH'],
+    add: [{
+      id: '01M5D0AE6TJDT4W664FE4AABET',
+      title: 'Degraded data serving in EU',
+      startedAt: '2026-10-20T15:20:00.000Z',
+      resolvedAt: '2026-10-20T16:20:00.000Z',
+      impact: 'minor',
+    }, {
+      id: '01M5EPTJX79TDVMB07KQV902HH',
+      title: 'Slow trace data retirival across API and UI in EU',
+      startedAt: '2026-10-21T07:15:00.000Z',
+      resolvedAt: '2026-10-21T08:45:40.000Z',
+      impact: 'minor',
+    }, {
+      id: '01M59SQX711PHWS3C697ZQN8NH',
+      title: 'Degraded public API performance',
+      startedAt: '2026-10-19T09:31:38.842Z',
+      resolvedAt: '2026-10-19T10:46:14.000Z',
+      impact: 'minor',
+    }],
+  },
+  '2026-10-groq-impact-start': {
+    period: '2026-10',
+    service: 'groq',
+    source: 'https://groqstatus.com status-page component_impacts read 2026-11-19: each impact window opens before the post the archived start came from (#2044)',
+    remove: ['01M4Q2YY67TVYM451RE835DJAK'],
+    add: [{
+      id: '01M4Q2YY67TVYM451RE835DJAK',
+      title: 'GroqCloud Console Errors Affecting Multiple Regions',
+      startedAt: '2026-10-12T03:17:00.000Z',
+      resolvedAt: '2026-10-12T04:00:32.000Z',
+      impact: 'minor',
+    }],
+  },
 }
 
 const isCanonicalUtc = (s: string) => {

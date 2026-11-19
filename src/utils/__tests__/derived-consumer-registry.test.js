@@ -321,6 +321,7 @@ const SU_APPLIERS = {
   'src/utils/incidentNote.js': 'THE discriminator — gives a zeroLengthRecord row its own note instead of the #1390 one, which claims the provider published a recovery before the start; order is load-bearing because a zero-length record carries both flags',
   'src/pages/Overview.jsx': 'the flap-group label states the unknown rather than falling through to the ongoing label',
   'worker/src/monthly-narrative.ts': 'selectIncidentCandidates skips it — formatDurationLabel would call a resolved row with durationMin 0 "ongoing", the same mislabel sumGroupDuration was fixed for, and the prompt orders the model to copy durationLabel VERBATIM into the published report',
+  'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes stamps the flag on its anchored path — and #2044 preferEarlierImpactStart skips a flagged row, whose startedAt is an anchor on its own resolvedAt and has no earlier post to move from',
   'api/_is-down/html-template.ts': 'states the duration unknown rather than dropping the field, and discloses that no usable time range was available — it does NOT claim which end of the outage the shown instant marks, because nothing establishes that (see the startUnknown doc in worker/src/types.ts)',
 }
 
@@ -340,9 +341,6 @@ const SU_SAFE = {
   'src/utils/liveIncidentRows.js': '#1338 derives no elapsed time; resolvedAt only orders two members of one event, and a row carries one member\'s fields whole, flag included',
   'src/utils/referenceIncidents.js': '#2027 derives no elapsed time; a row carries one reference incident\'s fields whole, flag included, and only id and status are read',
   'worker/src/mistral-public-api.ts': 'PRODUCES incidents from the public API and reads back only the ones it stored itself; never reads the startUnknown flag',
-  // Producers. `parsers/incident-io.ts` stamps the flag on its own anchored path; #1480's zero-length
-  // case is stamped once in `services.ts`, over every parser's output. No parser stamps it itself.
-  'worker/src/parsers/incident-io.ts': 'PRODUCES it — correctIncidentIoImpossibleTimes is where the flag is stamped and where the repair is attempted first',
   'worker/src/parsers/incident-io-proxy.ts': 'renders the provider\'s incident feed into page text (#1752); it derives no elapsed time and stamps no flag — the repair above runs on what it renders',
   'worker/src/parsers/betterstack.ts': 'producer — parses an upstream payload, never stamps startUnknown',
   'worker/src/parsers/instatus.ts': 'producer — parses an upstream payload, never stamps startUnknown',

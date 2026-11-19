@@ -942,25 +942,7 @@ export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: st
   // `resolved_at` is the START. Repairing half the pair from a trustworthy source and keeping the other
   // half from an untrustworthy one produced a `start === end` comparison, which the strict check below
   // then rejected, discarding a real 9-minute window that was sitting on the page.
-  const windows = new Map<string, { start: string; end: string }>()
-  for (const im of impacts ?? []) {
-    const id = im.status_page_incident_id
-    const start = im.start_at
-    const end = im.end_at
-    if (!id || !start || !end) continue
-    // An announced maintenance window is not outage evidence — the same decision
-    // `parseIncidentIoComponentImpacts` below and `INCIDENT_IO_STATUS_WEIGHTS` already make about these
-    // very rows. `parseIncidentIoImpacts` does not filter by status, so without this the repair could
-    // take a "real start" from a maintenance window and the two halves of one change would disagree.
-    if (isMaintenanceStatus(im.status)) continue
-    const prev = windows.get(id)
-    windows.set(id, prev === undefined
-      ? { start, end }
-      : {
-          start: Date.parse(start) < Date.parse(prev.start) ? start : prev.start,
-          end: Date.parse(end) > Date.parse(prev.end) ? end : prev.end,
-        })
-  }
+  const windows = incidentImpactWindows(impacts)
   return incidents.map((inc) => {
     if (!needsRepair(inc)) return inc
     const w = windows.get(inc.id)
@@ -980,6 +962,62 @@ export function correctIncidentIoImpossibleTimes(incidents: Incident[], html: st
     warnAnchored(inc.id, material, inc.startedAt, inc.duration)
     return { ...inc, startedAt: inc.resolvedAt as string, duration: null, startUnknown: true }
   })
+}
+
+function incidentImpactWindows(impacts: IncidentIoImpact[] | null): Map<string, { start: string; end: string }> {
+  const windows = new Map<string, { start: string; end: string }>()
+  for (const im of impacts ?? []) {
+    const id = im.status_page_incident_id
+    const start = im.start_at
+    const end = im.end_at
+    if (!id || !start || !end) continue
+    // An announced maintenance window is not outage evidence — the same decision
+    // `parseIncidentIoComponentImpacts` below and `INCIDENT_IO_STATUS_WEIGHTS` already make about these
+    // very rows. `parseIncidentIoImpacts` does not filter by status, so without this the repair could
+    // take a "real start" from a maintenance window and the two halves of one change would disagree.
+    if (isMaintenanceStatus(im.status)) continue
+    const prev = windows.get(id)
+    windows.set(id, prev === undefined
+      ? { start, end }
+      : {
+          start: Date.parse(start) < Date.parse(prev.start) ? start : prev.start,
+          end: Date.parse(end) > Date.parse(prev.end) ? end : prev.end,
+        })
+  }
+  return windows
+}
+
+/** #2044 — a resolved incident starts at the earliest record of it the provider published: its first post
+ *  or the start of its own impact window, whichever is earlier. Runs after `correctIncidentIoImpossibleTimes`.
+ *  A window starting in an earlier UTC month than the stored start is not taken: the monthly accumulator
+ *  keeps a row in the month it was first stored under (#2042). */
+export function preferEarlierImpactStart(incidents: Incident[], html: string | undefined): Incident[] {
+  if (!html) return incidents
+  const windows = incidentImpactWindows(parseIncidentIoImpacts(html))
+  return incidents.map((inc) => {
+    if (inc.startUnknown) return inc
+    const w = windows.get(inc.id)
+    if (!w) return inc
+    const winStart = Date.parse(w.start)
+    const start = Date.parse(inc.startedAt)
+    const end = inc.resolvedAt ? Date.parse(inc.resolvedAt) : NaN
+    if (!(start < end) || !(winStart < Date.parse(w.end)) || !(winStart < start)) return inc
+    const startedAt = new Date(winStart).toISOString()
+    if (startedAt.slice(0, 7) !== new Date(start).toISOString().slice(0, 7)) {
+      warnOnce(`month:${inc.id}`, `[preferEarlierImpactStart] ${inc.id}: impact window opens ${w.start}, in an earlier month than the stored start ${inc.startedAt} — start left unchanged`)
+      return inc
+    }
+    warnOnce(`moved:${inc.id}`, `[preferEarlierImpactStart] ${inc.id}: start ${inc.startedAt} -> ${startedAt} from component_impacts, duration ${inc.duration ?? 'null'} -> ${formatDuration(new Date(winStart), new Date(end))}`)
+    return { ...inc, startedAt, duration: formatDuration(new Date(winStart), new Date(end)) }
+  })
+}
+
+const warnedEarlierStart = new Set<string>()
+function warnOnce(key: string, line: string): void {
+  if (warnedEarlierStart.has(key)) return
+  if (warnedEarlierStart.size >= 500) warnedEarlierStart.clear()
+  warnedEarlierStart.add(key)
+  console.log(line)
 }
 
 /** Warn-once per incident. `correctIncidentIoImpossibleTimes` runs on the WHOLE pre-filter incident list
