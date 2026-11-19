@@ -275,7 +275,7 @@ ${clarityInitScript(nonce)}
   .mock-card-score-badge { font-size: 10px; font-weight: 500; font-family: var(--font-mono); padding: 2px 6px; border-radius: 4px; }
   .mock-history { display: flex; gap: 2px; align-items: flex-end; height: 18px; }
   .mock-history span { flex: 1; border-radius: 4px; display: block; }
-  .mock-badge { font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+  .mock-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 500; letter-spacing: 0.06em; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
   .badge-ok { background: rgba(63,185,80,0.15); color: var(--green); }
   .badge-warn { background: rgba(210,153,34,0.15); color: var(--amber); }
   .mock-panel { background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; }
@@ -464,18 +464,13 @@ ${clarityInitScript(nonce)}
     .mock-analyze-desktop { display: none !important; }
     .mock-body { padding: 12px; }
     .mock-stats-row { grid-template-columns: repeat(2, 1fr); }
-    .mock-stat-card { padding: 8px 10px; }
-    .mock-stat-value { font-size: 16px; }
-    .mock-stat-label { font-size: 9px; }
     .mock-cards { grid-template-columns: 1fr; }
     .mock-card { padding: 10px 12px; }
     .mock-card-header { margin-bottom: 4px; }
-    .mock-card-name { font-size: 12px; }
     .mock-card-grid { display: none; }
     .mock-card-score { display: none; }
     .mock-card-compact { display: flex !important; }
     .mock-history { height: 10px; transform: scaleY(0.55); transform-origin: bottom; }
-    .mock-badge { font-size: 9px; padding: 2px 6px; }
     .mock-controls { flex-direction: column; align-items: flex-start; }
     .mock-card-provider { display: none; }
     .mock-panel { display: none; }
@@ -936,7 +931,7 @@ ${announcementHtml}
         <div class="feature-tag">SEO PAGE</div>
         <div class="feature-icon">🔍</div>
         <div class="feature-title" data-i18n="feat.4.title">"Is X Down?" 전용 페이지</div>
-        <div class="feature-desc" data-i18n="feat.4.desc">ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.</div>
+        <div class="feature-desc" data-i18n="feat.4.desc">ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다. 여러 제공사의 인시던트가 같은 외부 서비스(예: Microsoft 365)를 가리키면 공통 원인 가능성으로 함께 표시합니다.</div>
       </div>
     </div>
   </div>
@@ -996,7 +991,7 @@ ${announcementHtml}
   <div class="alert-inner">
     <p class="section-label">// real-time alerts</p>
     <h2 class="section-title" data-i18n="alert.title">장애 알림, 원하는 방식으로</h2>
-    <p class="section-sub" data-i18n="alert.sub">장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.</p>
+    <p class="section-sub" data-i18n="alert.sub">장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다. Discord·Slack은 점검 알림을 선택해 받을 수도 있습니다.</p>
     <div class="alert-channels">
       <a class="ch-badge ch-discord" href="https://ai-watch.dev/#settings?focus=alerts" title="Set up Discord push alerts" data-ga="click_cta_alerts" data-ga-loc="landing_alert" data-ga-source="discord_badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</a>
       <a class="ch-badge ch-slack" href="${slackInstallUrl()}" title="Add AIWatch to a Slack channel" data-ga="click_add_to_slack" data-ga-loc="landing_alert" data-ga-source="slack_badge">${slackLogoSvg(13)}<span>Slack</span></a>
@@ -1147,6 +1142,9 @@ ${announcementHtml}
       <a href="/reports/" data-i18n="footer.report">월간 리포트</a>
       <a href="https://ai-watch.dev/#settings?focus=alerts" data-i18n="footer.alert" data-ga="click_cta_alerts" data-ga-loc="landing_footer">알림 설정</a>
       <a href="https://ai-watch.dev/is-claude-down">Is Claude Down?</a>
+      <a href="/badges" data-i18n="footer.badges">상태 배지</a>
+      <a href="/plugin" data-i18n="footer.plugin">Claude Code 플러그인</a>
+      <a href="https://ai-watch.dev/#statusline" data-i18n="footer.statusline">스테이터스라인</a>
     </div>
   </div>
 </footer>
@@ -1162,13 +1160,12 @@ const i18n = {
     'hero.cta1': '대시보드 열기 →', 'hero.trust': '로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)', 'hero.cta2': 'GitHub에서 보기',
     'hero.pill1': 'AI 서비스', 'hero.pill2v': '실시간', 'hero.pill2': '알림', 'hero.pill3': '오픈소스',
     'flow.1.title': '장애 감지', 'flow.2.conn': 'AI 분석 시작', 'flow.2.bar': '패턴 분석 중', 'flow.3.conn': 'Discord · Slack · RSS 알림', 'flow.3.title': '알림 발송', 'flow.3.body': 'Discord · Slack · RSS 알림 발송', 'flow.4.conn': '대안 추천', 'flow.4.title': 'Fallback 추천',
-    'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord · Slack · RSS 알림 포함', 'stats.oss': '오픈소스',
     'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 47개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 AIWatch가 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
-    'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
+    'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-api-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다. 여러 제공사의 인시던트가 같은 외부 서비스(예: Microsoft 365)를 가리키면 공통 원인 가능성으로 함께 표시합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
     'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 50개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '50개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '종합 점수 없음 (업타임 %만)', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
     'how.1.badge': '자동', 'how.2.badge': '장애 감지 시', 'how.3.badge': '실시간', 'how.4.badge': '매월',
@@ -1177,11 +1174,11 @@ const i18n = {
     'how.3.title': '알림', 'how.3.desc': 'Discord · Slack · RSS 실시간 알림 + Fallback 추천',
     'how.4.title': '리포트', 'how.4.desc': '월간 업타임 추이 · 인시던트 통계 리포트 공개',
     'cta.title': '지금 바로 확인하세요', 'cta.sub': '완전 무료 · 설치 불필요 · Discord · Slack · RSS 알림', 'cta.btn1': '지금 장애 확인하기 →', 'cta.btn2': '알림 설정하기', 'cta.rss': 'RSS 피드 복사',
-    'alert.title': '장애 알림, 원하는 방식으로', 'alert.sub': '장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.',
+    'alert.title': '장애 알림, 원하는 방식으로', 'alert.sub': '장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다. Discord·Slack은 점검 알림을 선택해 받을 수도 있습니다.',
     'alert.rss.copied': '복사됨 ✓', 'alert.rss.prompt': 'RSS 피드 URL 복사:',
     'alert.slack.btn': 'Slack에 추가', 'alert.slack.feedAlt': '앱 설치가 막혀 있다면: /feed 명령어 복사', 'alert.slack.copied': '복사됨! Slack 채널에 붙여넣으세요', 'alert.slack.prompt': 'Slack 명령어 복사:',
     'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 50개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다',
-    'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
+    'footer.report': '월간 리포트', 'footer.alert': '알림 설정', 'footer.badges': '상태 배지', 'footer.plugin': 'Claude Code 플러그인', 'footer.statusline': '스테이터스라인'
   },
   en: {
     'nav.features': 'Features', 'nav.how': 'How it works', 'nav.methodology': 'Methodology', 'nav.report': 'Monthly Report', 'nav.cta': 'Check for Outages →',
@@ -1191,13 +1188,12 @@ const i18n = {
     'hero.cta1': 'Open the dashboard →', 'hero.trust': 'No signup · Live status · Free & open source (AGPL)', 'hero.cta2': 'View on GitHub',
     'hero.pill1': 'AI Services', 'hero.pill2v': 'Real-time', 'hero.pill2': 'Alerts', 'hero.pill3': 'Open Source',
     'flow.1.title': 'Outage Detected', 'flow.2.conn': 'AI analysis started', 'flow.2.bar': 'Analyzing patterns', 'flow.3.conn': 'Discord · Slack · RSS alerts', 'flow.3.title': 'Alert Sent', 'flow.3.body': 'Discord · Slack · RSS alert sent', 'flow.4.conn': 'Alternatives suggested', 'flow.4.title': 'Fallback Suggested',
-    'stats.services': 'Services monitored', 'stats.interval': 'Auto-collected', 'stats.free': 'Discord · Slack · RSS alerts included', 'stats.oss': 'Open source',
     'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 47 more services...',
     'feat.title': 'Beyond status monitoring', 'feat.sub': 'An AI monitoring dashboard that helps you make decisions',
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (40) + Incident impact days (25) + Recovery time (15) + Responsiveness (20).',
     'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, AIWatch analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
-    'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-api-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
+    'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-api-down show real-time status, AI analysis, and fallback recommendations — all in one place. When incidents from different providers name the same third party (such as Microsoft 365), AIWatch flags a likely shared cause.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
     'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 50 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 50 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'No composite score (uptime % only)', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
     'how.1.badge': 'Auto', 'how.2.badge': 'On detection', 'how.3.badge': 'Real-time', 'how.4.badge': 'Monthly',
@@ -1206,11 +1202,11 @@ const i18n = {
     'how.3.title': 'Alert', 'how.3.desc': 'Real-time alerts via Discord · Slack · RSS + fallback recommendations',
     'how.4.title': 'Report', 'how.4.desc': 'Monthly uptime trends · incident statistics report',
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord · Slack · RSS alerts', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts', 'cta.rss': 'Copy RSS feed',
-    'alert.title': 'Get notified, your way', 'alert.sub': 'Real-time incident alerts with AI analysis and fallback recommendations. Free.',
+    'alert.title': 'Get notified, your way', 'alert.sub': 'Real-time incident alerts with AI analysis and fallback recommendations. Free. Discord and Slack can also get Scheduled Maintenance Alerts, if you turn them on.',
     'alert.rss.copied': 'Copied ✓', 'alert.rss.prompt': 'Copy this RSS feed URL:',
     'alert.slack.btn': 'Add to Slack', 'alert.slack.feedAlt': "Can't install Slack apps? Copy the /feed command", 'alert.slack.copied': 'Copied! Paste into any Slack channel', 'alert.slack.prompt': 'Copy Slack command:',
     'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 50 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability',
-    'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
+    'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings', 'footer.badges': 'Status Badges', 'footer.plugin': 'Claude Code Plugin', 'footer.statusline': 'Statusline'
   }
 };
 
