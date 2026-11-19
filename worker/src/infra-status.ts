@@ -143,11 +143,40 @@ export function formatInfraRecovery(name: string): { title: string; description:
 type Embed = { title: string; description: string; color: number }
 
 export const ALERT_TTL_S = 7200
+const HOLD_REFRESH_MS = (ALERT_TTL_S * 1000) / 2
+
+type HoldDecision = { send: 'alert' | 'recovery' | null; write: string | null }
+
+export function decideAlertHold(state: string | null, level: string | null, now: number): HoldDecision {
+  const affected = state !== null && state !== 'recovered'
+  if (level === null) return affected ? { send: 'recovery', write: 'recovered' } : { send: null, write: null }
+  if (!state) return { send: 'alert', write: `affected:${level}:${now}` }
+  if (!affected) return { send: null, write: null }
+  const [, held, at] = state.split(':')
+  if (held === 'degraded' && level === 'down') return { send: 'alert', write: `affected:down:${now}` }
+  const worst = held === 'down' ? held : level
+  if (now - (Number(at) || 0) >= HOLD_REFRESH_MS) return { send: null, write: `affected:${worst}:${now}` }
+  return { send: null, write: null }
+}
+
+export async function applyAlertHold(
+  kv: KVNamespace,
+  key: string,
+  level: string | null,
+  alert: () => Promise<boolean>,
+  recovery: () => Promise<boolean>,
+): Promise<HoldDecision['send']> {
+  const state = await kv.get(key).catch(() => null)
+  const d = decideAlertHold(state, level, Date.now())
+  if (d.send === 'alert' && !(await alert())) return null
+  if (d.send === 'recovery' && !(await recovery())) return null
+  if (d.write) await kvPut(kv, key, d.write, { expirationTtl: ALERT_TTL_S })
+  return d.send
+}
 
 /** One cron cycle: publish the statuses for the latency alert to read (only while one is affected;
  *  the 15-minute TTL clears it after a recovery), then alert on a platform
- *  turning non-operational and on its recovery: at most one alert and one recovery per platform
- *  per ALERT_TTL_S hold. */
+ *  turning non-operational or worsening to down, and on its recovery. */
 export async function runInfraStatusCycle(
   kv: KVNamespace,
   send: (embed: Embed) => Promise<boolean>,
@@ -157,13 +186,8 @@ export async function runInfraStatusCycle(
     await kvPut(kv, INFRA_STATUS_KEY, JSON.stringify(statuses), { expirationTtl: 900 })
   }
   for (const s of statuses) {
-    const key = infraAlertKey(s.id)
-    const state = await kv.get(key).catch(() => null)
-    if (s.status !== 'operational' && !state) {
-      if (await send(formatInfraAlert(s))) await kvPut(kv, key, 'affected', { expirationTtl: ALERT_TTL_S })
-    } else if (s.status === 'operational' && state === 'affected') {
-      if (await send(formatInfraRecovery(s.name))) await kvPut(kv, key, 'recovered', { expirationTtl: ALERT_TTL_S })
-    }
+    await applyAlertHold(kv, infraAlertKey(s.id), s.status === 'operational' ? null : s.status,
+      () => send(formatInfraAlert(s)), () => send(formatInfraRecovery(s.name)))
   }
 }
 
