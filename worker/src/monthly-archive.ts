@@ -878,6 +878,10 @@ export function accumulateMonthlyIncidents(
           else delete existingDetail.zeroLengthRecord
           if (inc.crossEventKey) existingDetail.crossEventKey = inc.crossEventKey // #1859
           if (inc.keptAfterComponentRecovery) existingDetail.keptAfterComponentRecovery = true
+          if (inc.autoMonitor && !existingDetail.autoMonitor) {
+            existingDetail.autoMonitor = true
+            existingDetail.title = inc.title
+          }
           const timeline = compactTimeline(inc)
           if (timeline) existingDetail.timeline = mergeCompactTimelines(existingDetail.timeline, timeline)
           // KNOWN LIMIT, two parts. `data.dates` was banked from the FIRST shape's `incidentDay(inc)`
