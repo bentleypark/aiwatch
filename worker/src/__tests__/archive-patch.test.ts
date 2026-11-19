@@ -660,6 +660,35 @@ describe('#1797 — a stuck row is re-added under its own id with the provider\'
   }
 })
 
+describe('#2042 — a row whose provider start moved to the previous month is moved with it', () => {
+  const leave = ROW_REPLACEMENTS['2026-10-deepgram-moved']
+  const enter = ROW_REPLACEMENTS['2026-09-deepgram-moved']
+  const stored: MonthlyIncidentEntry = {
+    id: 'thyrbpkl5z0f', title: 'Elevated API errors', startedAt: '2026-10-01T13:18:07.902Z',
+    resolvedAt: '2026-09-30T19:39:04.000Z', durationMin: 10, finalStatus: 'resolved', impact: 'minor',
+  }
+  const archiveOf = (period: string, list: MonthlyIncidentEntry[]): PatchableArchive => {
+    const svc: Record<string, unknown> = { incidentList: list, officialUptime: null }
+    return { services: { deepgram: { ...svc, ...figuresFrom('deepgram', svc, list, monthWindow(period)) } } }
+  }
+
+  it('the October entry removes the row the September entry adds, under the same id and title', () => {
+    expect(leave.add).toEqual([])
+    expect(leave.remove).toEqual([enter.add[0].id])
+    expect(enter.remove).toEqual([])
+    expect(enter.add[0].title).toBe(stored.title)
+  })
+
+  it('October loses the row and September gains it with the provider times', () => {
+    const out = planRowReplacement(archiveOf('2026-10', [stored]), monthWindow('2026-10'), leave)
+    expect(out.refusals).toEqual([])
+    expect(out.changes[0].keptList).toEqual([])
+    const into = planRowReplacement(archiveOf('2026-09', []), monthWindow('2026-09'), enter)
+    expect(into.refusals).toEqual([])
+    expect(into.changes[0].keptList).toEqual([{ ...enter.add[0], durationMin: 10, finalStatus: 'resolved' }])
+  })
+})
+
 // #1830 — a month with no incidents is archived with no `incidentList` key at all (6 of 46 services in
 // archive:monthly:2026-09 before this patch, fal among them), so rows can only be added to it if that absence reads as [].
 describe('#1830 — rows added to a service archived with no incidents', () => {
