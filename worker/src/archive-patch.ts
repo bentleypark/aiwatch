@@ -411,6 +411,26 @@ export const ROW_REPLACEMENTS: Record<string, RowReplacement> = {
     ],
     add: [],
   },
+  '2026-10-deepgram-moved': {
+    period: '2026-10',
+    service: 'deepgram',
+    source: 'https://status.deepgram.com/incidents/thyrbpkl5z0f.json read 2026-11-19: created_at 2026-09-30T19:29:08Z, so the row belongs to 2026-09 (#2042)',
+    remove: ['thyrbpkl5z0f'],
+    add: [],
+  },
+  '2026-09-deepgram-moved': {
+    period: '2026-09',
+    service: 'deepgram',
+    source: 'https://status.deepgram.com/incidents/thyrbpkl5z0f.json read 2026-11-19: created_at / resolved_at (#2042)',
+    remove: [],
+    add: [{
+      id: 'thyrbpkl5z0f',
+      title: 'Elevated API errors',
+      startedAt: '2026-09-30T19:29:08.000Z',
+      resolvedAt: '2026-09-30T19:39:04.000Z',
+      impact: 'minor',
+    }],
+  },
 }
 
 const isCanonicalUtc = (s: string) => {
