@@ -118,7 +118,7 @@ describe('#1686 applyRumVerdict', () => {
     expect(await applyRumVerdict(kv as never, send, slow, 'SEA', 'KR')).toBe('alerted')
     expect(await applyRumVerdict(kv as never, send, slow, 'SEA', 'KR')).toBe('none')
     expect(send).toHaveBeenCalledTimes(1)
-    expect(kv.store[rumAlertKey('KR')]).toBe('slow')
+    expect(kv.store[rumAlertKey('KR')]).toMatch(/^affected:slow:/)
     const embed = (send.mock.calls[0] as unknown as [{ title: string; description: string }])[0]
     expect(embed.title).toContain('KR via SEA')
     expect(embed.description).toContain('network path')
@@ -138,7 +138,7 @@ describe('#1686 applyRumVerdict', () => {
     expect(send).toHaveBeenCalledTimes(2)
     expect(await applyRumVerdict(kv as never, send, healthy, 'ICN', 'KR')).toBe('recovered')
     expect(kv.store[rumAlertKey('KR')]).toBe('recovered')
-    expect(kv.store[rumAlertKey('SG')]).toBe('slow')
+    expect(kv.store[rumAlertKey('SG')]).toMatch(/^affected:slow:/)
   })
   it('alternating slow and healthy batches on one path send at most one alert and one recovery per hold', async () => {
     const kv = mockKV()
@@ -158,6 +158,26 @@ describe('#1686 applyRumVerdict', () => {
     const kv = mockKV()
     expect(await applyRumVerdict(kv as never, async () => false, slow, 'SEA', 'KR')).toBe('none')
     expect(kv.store[rumAlertKey('KR')]).toBeUndefined()
+  })
+  it('a slow period longer than the hold TTL alerts once, and a failed recovery is retried (#2038)', async () => {
+    vi.useFakeTimers()
+    try {
+      const store: Record<string, { v: string; until: number }> = {}
+      const kv = {
+        get: async (k: string) => (store[k] && store[k].until > Date.now() ? store[k].v : null),
+        put: async (k: string, v: string, o?: { expirationTtl?: number }) => { store[k] = { v, until: Date.now() + (o?.expirationTtl ?? Infinity) * 1000 } },
+      }
+      const send = vi.fn(async () => true)
+      for (let i = 0; i < 72; i++) {
+        await applyRumVerdict(kv as never, send, slow, 'ICN', 'KR')
+        vi.advanceTimersByTime(5 * 60_000)
+      }
+      expect(send).toHaveBeenCalledTimes(1)
+      expect(await applyRumVerdict(kv as never, async () => false, healthy, 'ICN', 'KR')).toBe('none')
+      expect(await applyRumVerdict(kv as never, send, healthy, 'ICN', 'KR')).toBe('recovered')
+    } finally {
+      vi.useRealTimers()
+    }
   })
   it('attaches the affected platforms from the last infra cycle', async () => {
     const kv = mockKV({
@@ -266,7 +286,7 @@ describe('#1686 worker wiring', () => {
     await Promise.all(pending)
     expect(res.status).toBe(204)
     expect(discord).toHaveBeenCalledWith('https://discord.example/hook', expect.objectContaining({ method: 'POST' }))
-    expect(kv.store[rumAlertKey('XX')]).toBe('slow')
+    expect(kv.store[rumAlertKey('XX')]).toMatch(/^affected:slow:/)
   })
   it('/api/rum rejects a malformed batch', async () => {
     const res = await workerModule.fetch(

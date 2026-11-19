@@ -5,8 +5,7 @@
 // #1686; the alert says whether the time went to the network path (the worker answered quickly) or to
 // the worker itself.
 
-import { kvPut } from './utils'
-import { ALERT_TTL_S, readInfraContext } from './infra-status'
+import { applyAlertHold, readInfraContext } from './infra-status'
 
 export const RUM_INDEX = 'rum-api'
 export const RUM_WINDOW = 5
@@ -145,7 +144,7 @@ export function formatRumRecovery(country: string, colo: string): { title: strin
   }
 }
 
-/** Per country: at most one alert and one recovery per ALERT_TTL_S hold. The hold is shared by
+/** Per country: one alert per slow period, and at most one recovery per ALERT_TTL_S hold. The hold is shared by
  *  every tab in that country while the 4-of-5 rule is per tab, so a recovery keeps the hold rather than
  *  clearing it. Only `slow` and `healthy` verdicts can change anything. */
 export async function applyRumVerdict(
@@ -156,21 +155,10 @@ export async function applyRumVerdict(
   country: string,
 ): Promise<'alerted' | 'recovered' | 'none'> {
   if (verdict.kind !== 'slow' && verdict.kind !== 'healthy') return 'none'
-  const key = rumAlertKey(country)
-  const state = await kv.get(key).catch(() => null)
-  if (verdict.kind === 'slow' && !state) {
-    const embed = formatRumAlert(verdict, colo, country, await readInfraContext(kv))
-    if (await send(embed)) {
-      await kvPut(kv, key, 'slow', { expirationTtl: ALERT_TTL_S })
-      return 'alerted'
-    }
-  } else if (verdict.kind === 'healthy' && state === 'slow') {
-    if (await send(formatRumRecovery(country, colo))) {
-      await kvPut(kv, key, 'recovered', { expirationTtl: ALERT_TTL_S })
-      return 'recovered'
-    }
-  }
-  return 'none'
+  const sent = await applyAlertHold(kv, rumAlertKey(country), verdict.kind === 'slow' ? 'slow' : null,
+    async () => verdict.kind === 'slow' && send(formatRumAlert(verdict, colo, country, await readInfraContext(kv))),
+    () => send(formatRumRecovery(country, colo)))
+  return sent === 'alert' ? 'alerted' : sent === 'recovery' ? 'recovered' : 'none'
 }
 
 /** Adds the worker's own handling time to the two endpoints the dashboard polls, and exposes it to

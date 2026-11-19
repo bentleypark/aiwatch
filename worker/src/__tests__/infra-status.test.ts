@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   INFRA_PLATFORMS, INFRA_STATUS_KEY, parseInfraSummary, runInfraStatusCycle, readInfraContext, infraAlertKey,
-  checkInfraStatus, type InfraPlatformStatus,
+  checkInfraStatus, decideAlertHold, ALERT_TTL_S, type InfraPlatformStatus,
 } from '../infra-status'
 import { mockKV } from './helpers/unreadable-source'
 
@@ -69,7 +69,7 @@ describe('#1686 runInfraStatusCycle', () => {
     await runInfraStatusCycle(kv as never, send, [status('cloudflare', 'degraded')])
     await runInfraStatusCycle(kv as never, send, [status('cloudflare', 'degraded')])
     expect(send).toHaveBeenCalledTimes(1)
-    expect(kv.store[infraAlertKey('cloudflare')]).toBe('affected')
+    expect(kv.store[infraAlertKey('cloudflare')]).toMatch(/^affected:degraded:/)
     await runInfraStatusCycle(kv as never, send, [status('cloudflare', 'operational')])
     expect(send).toHaveBeenCalledTimes(2)
     expect(kv.store[infraAlertKey('cloudflare')]).toBe('recovered')
@@ -93,5 +93,92 @@ describe('#1686 runInfraStatusCycle', () => {
     const kv = mockKV()
     await runInfraStatusCycle(kv as never, async () => false, [status('vercel', 'down')])
     expect(kv.store[infraAlertKey('vercel')]).toBeUndefined()
+  })
+})
+
+// KV that drops a key once its expirationTtl has passed on the test's clock.
+function expiringKV() {
+  const store: Record<string, { v: string; until: number }> = {}
+  let now = 0
+  return {
+    advance: (ms: number) => { now += ms },
+    get now() { return now },
+    get: vi.fn(async (k: string) => (store[k] && store[k].until > now ? store[k].v : null)),
+    put: vi.fn(async (k: string, v: string, o?: { expirationTtl?: number }) => {
+      store[k] = { v, until: o?.expirationTtl ? now + o.expirationTtl * 1000 : Infinity }
+    }),
+  }
+}
+
+describe('#2038 infra alert hold across a long affected period', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+  const CYCLE = 5 * 60_000
+  const run = async (kv: ReturnType<typeof expiringKV>, send: (embed: { title: string }) => Promise<boolean>, s: InfraPlatformStatus['status'], cycles: number) => {
+    for (let i = 0; i < cycles; i++) {
+      vi.setSystemTime(kv.now)
+      await runInfraStatusCycle(kv as never, send, [status('cloudflare', s)])
+      kv.advance(CYCLE)
+    }
+  }
+  it('an affected period longer than the hold TTL sends one alert, then one recovery', async () => {
+    const kv = expiringKV()
+    const send = vi.fn(async (_embed: { title: string }) => true)
+    await run(kv, send, 'degraded', (5 * 24 * 3600) / 300)
+    expect(send).toHaveBeenCalledTimes(1)
+    await run(kv, send, 'operational', 2)
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send.mock.calls[1][0].title).toContain('recovered')
+  })
+  it('a period that worsens to down alerts again once, and easing back does not', async () => {
+    const kv = expiringKV()
+    const send = vi.fn(async (_embed: { title: string }) => true)
+    await run(kv, send, 'degraded', 3)
+    await run(kv, send, 'down', 3)
+    await run(kv, send, 'degraded', 3)
+    await run(kv, send, 'down', 3)
+    expect(send.mock.calls.map((c) => c[0].title)).toEqual([
+      '🟡 AIWatch infrastructure — cloudflare degraded',
+      '🔴 AIWatch infrastructure — cloudflare down',
+    ])
+  })
+  it('a failed recovery send keeps the hold, so the next cycle retries the recovery', async () => {
+    const kv = expiringKV()
+    await run(kv, async () => true, 'degraded', 1)
+    const send = vi.fn(async (_embed: { title: string }) => false)
+    await run(kv, send, 'operational', 1)
+    send.mockImplementation(async () => true)
+    await run(kv, send, 'operational', 2)
+    expect(send.mock.calls.map((c) => c[0].title)).toEqual([
+      '🟢 AIWatch infrastructure — cloudflare recovered',
+      '🟢 AIWatch infrastructure — cloudflare recovered',
+    ])
+  })
+  it('refreshes the hold at most once per half TTL', async () => {
+    const kv = expiringKV()
+    await run(kv, async () => true, 'degraded', (ALERT_TTL_S * 2) / 300)
+    expect(kv.put.mock.calls.filter(([k]) => k === infraAlertKey('cloudflare'))).toHaveLength(4)
+  })
+})
+
+describe('#2038 decideAlertHold', () => {
+  const T = 10_000_000
+  it.each([
+    [null, null, { send: null, write: null }],
+    [null, 'degraded', { send: 'alert', write: `affected:degraded:${T}` }],
+    ['recovered', 'down', { send: null, write: null }],
+    ['recovered', null, { send: null, write: null }],
+    [`affected:degraded:${T}`, null, { send: 'recovery', write: 'recovered' }],
+    [`affected:degraded:${T - 1000}`, 'degraded', { send: null, write: null }],
+    [`affected:degraded:${T - ALERT_TTL_S * 500}`, 'degraded', { send: null, write: `affected:degraded:${T}` }],
+    [`affected:degraded:${T - 1000}`, 'down', { send: 'alert', write: `affected:down:${T}` }],
+    [`affected:down:${T - ALERT_TTL_S * 500}`, 'degraded', { send: null, write: `affected:down:${T}` }],
+    ['affected', 'degraded', { send: null, write: `affected:degraded:${T}` }],
+    ['affected', 'down', { send: null, write: `affected:down:${T}` }],
+    ['affected', null, { send: 'recovery', write: 'recovered' }],
+    ['slow', 'slow', { send: null, write: `affected:slow:${T}` }],
+    ['slow', null, { send: 'recovery', write: 'recovered' }],
+  ] as const)('%s + %s', (state, level, expected) => {
+    expect(decideAlertHold(state, level, T)).toEqual(expected)
   })
 })
