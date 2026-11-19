@@ -13,6 +13,8 @@
 //   DEEPSEEK_FEED_TOKEN  — Bearer token; must equal the Worker's DEEPSEEK_FEED_TOKEN secret
 // (playwright is imported lazily inside main() so the unit test can import withRetry without it.)
 
+import { isMain } from './is-main.mjs'
+
 // #668 — retry a flaky async op with linear backoff. status.deepseek.com (bot-walled Flashduty SPA)
 // intermittently exceeds the page.goto timeout; a single attempt fails the whole job. This retries the
 // transient failure. Throws the last error once attempts are exhausted (caller then exits non-zero).
@@ -114,7 +116,7 @@ async function main() {
 }
 
 // Guard so importing this module (e.g. the unit test for withRetry) does NOT launch a browser.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error('scrape-deepseek-feed failed:', err)
     process.exit(1)

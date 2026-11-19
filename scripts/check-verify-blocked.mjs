@@ -4,9 +4,8 @@
 // Exit 0 = eligible, 1 = not eligible, 2 = usage or gh error.
 
 import { execFileSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { verifyBlockedEligibility } from './verify-reminders.mjs'
+import { isMain } from './is-main.mjs'
 
 export function renderEligibility(result) {
   const head = `verify-blocked: ${result.eligible ? 'eligible' : 'not eligible'} — ${result.reason}`
@@ -34,7 +33,4 @@ function main(argv) {
   return result.eligible ? 0 : 1
 }
 
-const isMain = (() => {
-  try { return fileURLToPath(import.meta.url) === realpathSync(process.argv[1] ?? '') } catch { return false }
-})()
-if (isMain) process.exit(main(process.argv.slice(2)))
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)))

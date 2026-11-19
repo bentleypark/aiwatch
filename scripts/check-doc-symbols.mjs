@@ -31,6 +31,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -557,4 +558,4 @@ export function main(root) {
   console.log(`✅ doc-membership lint: ${bound} enumeration(s) checked (${memberAllowed} allowlisted)`)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main()
+if (isMain(import.meta.url)) main()

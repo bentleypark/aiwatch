@@ -11,11 +11,11 @@
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { summarizeRecoveryHistory } from '../worker/src/recovery-baseline'
 import { accuracyOf } from '../worker/src/incident-history'
 import type { IncidentHistoryRecord } from '../worker/src/incident-history'
 import type { TrainingRow } from './build-recovery-training-set'
+import { isMain } from './is-main.mjs'
 
 export const CANDIDATES = ['pastP80', 'backoffP80', 'stageP80', 'conformalP80'] as const
 export type Candidate = (typeof CANDIDATES)[number] | 'ai'
@@ -234,4 +234,4 @@ function main(argv: string[]): void {
   if (file) writeFileSync(file, JSON.stringify(scored))
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv.slice(2))
+if (isMain(import.meta.url)) main(process.argv.slice(2))

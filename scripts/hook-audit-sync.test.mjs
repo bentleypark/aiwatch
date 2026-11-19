@@ -124,7 +124,7 @@ test('with no env override, npm run hook-audit reads the bundle named in .memory
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'audit-default-')))
   mkdirSync(join(root, 'scripts'))
   mkdirSync(join(root, '.claude'))
-  for (const f of ['hook-audit-summary.mjs', 'hook-audit-sync.mjs', 'lint-decision-graph.mjs']) {
+  for (const f of ['hook-audit-summary.mjs', 'hook-audit-sync.mjs', 'is-main.mjs', 'lint-decision-graph.mjs']) {
     cpSync(join(REPO, 'scripts', f), join(root, 'scripts', f))
   }
   const bundle = join(root, 'bundle')

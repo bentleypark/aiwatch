@@ -27,6 +27,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { isMain } from './is-main.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE_DIR = join(REPO_ROOT, 'docs/reference')
@@ -185,11 +186,8 @@ export function lintRealBundle() {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
-function isMain() {
-  return process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-}
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const entries = collectBundleEntries()
   const findings = lintBundle(entries)
   console.log(`OKF bundle lint — docs/reference: ${entries.length} pages`)

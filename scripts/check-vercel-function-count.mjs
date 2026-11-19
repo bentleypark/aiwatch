@@ -24,6 +24,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative } from 'node:path'
+import { isMain } from './is-main.mjs'
 
 export const HOBBY_LIMIT = 12
 
@@ -78,11 +79,8 @@ export function countRealApiFunctions() {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
-function isMain() {
-  return process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-}
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const { count, files } = countRealApiFunctions()
   const headroom = HOBBY_LIMIT - count
   console.log(`Vercel Serverless Functions under api/: ${count} / ${HOBBY_LIMIT} (headroom ${headroom})`)

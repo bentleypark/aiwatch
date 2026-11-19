@@ -12,12 +12,12 @@
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { editorialRecoveryRecords } from '../worker/src/recovery-baseline'
 import { SERVICES } from '../worker/src/services'
 import { serviceGroupOf } from '../worker/src/service-groups'
 import type { DurationOverride } from '../worker/src/overrides'
 import type { ServiceConfig } from '../worker/src/types'
+import { isMain } from './is-main.mjs'
 
 export interface ArchiveRow {
   id: string
@@ -172,4 +172,4 @@ function main(argv: string[]): void {
   console.log(`services ${new Set(rows.map((r) => r.svc)).size}; with >= 10 joined rows ${[...new Set(joined.map((r) => r.svc))].filter((s) => joined.filter((r) => r.svc === s).length >= 10).length}`)
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv.slice(2))
+if (isMain(import.meta.url)) main(process.argv.slice(2))

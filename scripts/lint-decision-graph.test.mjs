@@ -410,6 +410,7 @@ test('main() resolves the bundle through .memory-dir when MEMORY_DIR is unset', 
   mkdirSync(join(root, 'scripts'))
   const script = join(root, 'scripts', 'lint-decision-graph.mjs')
   copyFileSync(fileURLToPath(new URL('./lint-decision-graph.mjs', import.meta.url)), script)
+  copyFileSync(fileURLToPath(new URL('./is-main.mjs', import.meta.url)), join(root, 'scripts', 'is-main.mjs'))
   const bundle = realpathSync(mkdtempSync(join(tmpdir(), 'ptr-bundle-')))
   writeFileSync(join(bundle, 'decision_solo.md'), '---\nname: solo\n---\nNo edges, no links.')
   writeFileSync(join(root, POINTER_FILE), `${bundle}\n`)

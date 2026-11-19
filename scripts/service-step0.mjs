@@ -8,8 +8,8 @@
 //          [--base <url>] [--probe <url,url>] [--control <url,url>] [--max-pages N]
 //        node scripts/service-step0.mjs check <file|-> [--previous <file>]
 
-import { readFileSync, realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { isMain } from './is-main.mjs'
 
 export const ROWS = ['uptime', 'history', 'probe', 'gap', 'boundary']
 export const HEADING = '## Step-0 audit'
@@ -395,7 +395,4 @@ async function main(argv) {
   return 2
 }
 
-const isMain = (() => {
-  try { return fileURLToPath(import.meta.url) === realpathSync(process.argv[1] ?? '') } catch { return false }
-})()
-if (isMain) process.exit(await main(process.argv.slice(2)))
+if (isMain(import.meta.url)) process.exit(await main(process.argv.slice(2)))

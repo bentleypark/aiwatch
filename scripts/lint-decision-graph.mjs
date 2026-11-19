@@ -25,6 +25,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
+import { isMain } from './is-main.mjs'
 
 /**
  * Where the bundle is, as CONFIGURATION — `MEMORY_DIR`, else a gitignored `.memory-dir` file at the
@@ -463,8 +464,5 @@ function main(argv) {
   process.exit(findings.length === 0 ? 0 : 1)
 }
 
-function isMain() {
-  return process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-}
 
-if (isMain()) main(process.argv.slice(2))
+if (isMain(import.meta.url)) main(process.argv.slice(2))

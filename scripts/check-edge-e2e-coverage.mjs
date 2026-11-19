@@ -32,6 +32,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 // Shared, not copied (#1006) — one comment tokenizer and one spec reader for both e2e guards.
 import { stripComments, readSpecs } from './check-e2e-ga-guard.mjs'
+import { isMain } from './is-main.mjs'
 
 // Endpoints under api/ that are NOT user-facing pages. Each needs a reason — the entry is a claim
 // that no browser ever navigates here, and a wrong one silently exempts a real page forever.
@@ -210,7 +211,7 @@ export async function auditRepo(repoRoot) {
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const problems = await auditRepo(join(dirname(fileURLToPath(import.meta.url)), '..'))
   if (problems.length) {
     console.error('✘ Edge e2e coverage/wiring problems:\n')

@@ -22,6 +22,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 // Matches the SPECIFIER alone, not an import statement. A wrapped import list —
 //   import {
@@ -122,7 +123,7 @@ export function readSpecs(testsDir) {
 
 export const TESTS_DIR = fileURLToPath(new URL('../tests', import.meta.url))
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const violations = findGaGuardViolations(readSpecs(TESTS_DIR))
   if (violations.length) {
     console.error('✗ e2e GA4 guard (#998) — these specs can send real hits to the production property:\n')

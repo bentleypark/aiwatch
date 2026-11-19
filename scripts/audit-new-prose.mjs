@@ -7,8 +7,8 @@
 // when a flagged sentence carries no source.
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { isMain } from './is-main.mjs'
 
 const WORKTREE = 'WORKTREE'
 const MIN_WORDS = 4
@@ -318,11 +318,8 @@ export function collect({ base, head = WORKTREE, cwd }) {
   return { findings, skipped }
 }
 
-function isMain() {
-  try { return fileURLToPath(import.meta.url) === realpathSync(process.argv[1] ?? '') } catch { return false }
-}
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   let findings, skipped, opts
   try {
     opts = parseArgs(process.argv.slice(2))
