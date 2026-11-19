@@ -7,6 +7,7 @@ import { readFileSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveMemoryDir, pointerPathFor } from './lint-decision-graph.mjs'
+import { isMain } from './is-main.mjs'
 
 export const LOCK_STALE_MS = 10 * 60 * 1000
 export const MAX_FILES_IN_MESSAGE = 8
@@ -109,8 +110,7 @@ function runNode(script, dir) {
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-if (isMain) {
+if (isMain(import.meta.url)) {
   const i = process.argv.indexOf('--trigger')
   const trigger = i > 0 ? process.argv[i + 1] : 'manual'
   const pointer = pointerPathFor(import.meta.url)

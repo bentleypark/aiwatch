@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process'
 // #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
 // close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
 import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes, findBacktickQuotedVerifyBoxes, liveVerifyOccurrences, findMalformedAssertLines, verifyDueDay } from './verify-assertions.mjs'
+import { isMain } from './is-main.mjs'
 
 // Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) lives in
 // verify-assertions.mjs as `isSuppressedReminderLine` — one definition shared by both scanners (#966).
@@ -947,7 +948,7 @@ async function main() {
 }
 
 // Only run main when executed directly (so importing the helpers in the test has no side effects).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((e) => {
     console.error('[verify-reminders] failed:', e)
     process.exit(1)

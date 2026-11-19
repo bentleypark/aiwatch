@@ -10,6 +10,7 @@ import { join, dirname, resolve } from 'node:path'
 import { homedir, hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { resolveMemoryDir, pointerPathFor } from './lint-decision-graph.mjs'
+import { isMain } from './is-main.mjs'
 
 /** Per-turn telemetry: one line every turn, no decision in it. */
 export const LOW_SIGNAL = new Set(['workflow-gates-reminder:inject', 'stop-nag-gate:clean'])
@@ -91,4 +92,4 @@ function main() {
   console.log(`hook-audit sync: +${add.length} line(s) → ${target}`)
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main()
+if (isMain(import.meta.url)) main()

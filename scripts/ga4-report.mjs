@@ -20,7 +20,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createSign } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 const DEFAULT_KEY_PATH = `${process.env.HOME}/.config/gcloud/legacy_credentials/ga4-reporter@aiwatch-ga4-10072.iam.gserviceaccount.com/adc.json`
 const DEFAULT_PROPERTY_ID = '529375750' // AIWatch GA4 property (account 145080382)
@@ -138,12 +138,7 @@ async function main() {
   console.log(args.json ? JSON.stringify(report, null, 2) : formatTable(report))
 }
 
-// Only run when invoked directly (not when imported for its pure helpers, e.g. by a test). Compares
-// real filesystem paths rather than raw URL strings — a `file://${process.argv[1]}` string comparison
-// (this repo's own #1150 regression, pinned in review-loop-gate.test.mjs / step35-verify-gate.test.mjs)
-// never matches once the path percent-encodes (a space, `#`, or non-ASCII character), which fails
-// OPEN here: the script would print nothing and exit 0, indistinguishable from "zero rows found".
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(err.cause ? `${err.message}\ncause: ${err.cause.message}` : err.message)
     process.exit(1)

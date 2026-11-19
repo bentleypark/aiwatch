@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isMain } from '../../scripts/is-main.mjs'
 
 const AUDIT_FILE = process.env.HOOK_AUDIT_LOG
   ? path.resolve(process.env.HOOK_AUDIT_LOG)
@@ -91,7 +92,7 @@ function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (isMain(import.meta.url)) {
   try {
     main()
   } catch {}

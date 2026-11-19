@@ -14,6 +14,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseAllowlist } from './check-doc-symbols.mjs'
+import { isMain } from './is-main.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -69,4 +70,4 @@ export function main(root = ROOT) {
   console.log(`✅ directory-map: ${files.length} modules, each with an entry line (${allowed} allowlisted)`)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main()
+if (isMain(import.meta.url)) main()

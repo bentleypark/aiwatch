@@ -31,6 +31,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { parseTrustedAuthors } from './verify-reminders.mjs'
+import { isMain } from './is-main.mjs'
 
 // Default base for a relative `/api/...` source — the prod worker (overridable for tests/local).
 export const DEFAULT_ASSERT_BASE = 'https://aiwatch-worker.p2c2kbf.workers.dev'
@@ -651,6 +652,6 @@ export function truncate(s, max = 120) {
   return s.length <= max ? s : `${s.slice(0, max)}… (${s.length} chars)`
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((e) => { console.error('[verify-assertions] failed:', e); process.exit(1) })
 }

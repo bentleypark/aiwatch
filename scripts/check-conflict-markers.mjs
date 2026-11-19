@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { isMain } from './is-main.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -32,11 +33,8 @@ export function scanRepo(root = REPO_ROOT) {
   return hits
 }
 
-function isMain() {
-  return process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-}
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const hits = scanRepo()
   if (hits.length > 0) {
     for (const h of hits) console.error(`${h.path}:${h.line}: ${h.text}`)

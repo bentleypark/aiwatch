@@ -6,8 +6,8 @@
 //        node scripts/classify-start.mjs --title "<title>" --body-file <path>
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { isMain } from './is-main.mjs'
 
 // [kind, strength, where, pattern, needsVerb, dropWithoutVerb]. `title` matches the title only, `any` the title
 // and the body. service-add reads the title only. A config field or status-rule word is strong only when its
@@ -110,7 +110,4 @@ function main(argv) {
   return 0
 }
 
-const isMain = (() => {
-  try { return fileURLToPath(import.meta.url) === realpathSync(process.argv[1] ?? '') } catch { return false }
-})()
-if (isMain) process.exit(main(process.argv.slice(2)))
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)))

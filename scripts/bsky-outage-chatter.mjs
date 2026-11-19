@@ -22,7 +22,7 @@
 //   --appview        override the appview host (default: https://api.bsky.app — see APPVIEW below)
 //   --json           print the raw per-query/per-day counts instead of a table
 
-import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 // api.bsky.app, NOT public.api.bsky.app. The public host answers `searchPosts` with a 403 even when
 // a valid token is supplied, while answering `getProfile` 200 unauthenticated on the same host.
@@ -240,7 +240,7 @@ async function main() {
     + '\noutage talk exists. A low number means "not caught by these queries", not "does not cluster".')
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(err.message)
     process.exit(1)

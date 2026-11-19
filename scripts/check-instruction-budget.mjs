@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -181,9 +182,6 @@ export function report({ total, budget, over, slack, status }, parts) {
   ].join('\n')
 }
 
-function isMain() {
-  try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1] ?? '') } catch { return false }
-}
 /** `--root=` / `--budget=` let the tests drive THIS file — the one CI runs — over and under the cap
  *  without editing the repo's own CLAUDE.md. Unusable input throws rather than coercing. */
 export function parseArgs(argv) {
@@ -202,7 +200,7 @@ export function parseArgs(argv) {
   return opts
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   let v, parts
   try {
     const { root, budget } = parseArgs(process.argv.slice(2))

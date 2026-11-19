@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,9 +10,9 @@ import { classify, auditNote } from '../.claude/hooks/evidence-line-gate.mjs'
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const HOOK = join(REPO, '.claude', 'hooks', 'evidence-line-gate.mjs')
 
-function runHook(input) {
+function runHook(input, hook = HOOK) {
   const log = join(mkdtempSync(join(tmpdir(), 'evidence-gate-')), 'hook-audit.jsonl')
-  const r = spawnSync('node', [HOOK], {
+  const r = spawnSync('node', [hook], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf8',
     env: { ...process.env, HOOK_AUDIT_LOG: log },
@@ -66,6 +66,14 @@ test('the hook re-prompts through Stop additionalContext, never decision:block',
   assert.equal(out.hookSpecificOutput.hookEventName, 'Stop')
   assert.match(out.hookSpecificOutput.additionalContext, /근거:/)
   assert.match(out.hookSpecificOutput.additionalContext, /carries no `근거:` line/)
+  assert.deepEqual(r.audit.map((e) => [e.hook, e.decision]), [['evidence-line-gate', 'warn']])
+})
+
+test('the hook still re-prompts when run through a symlinked project path (#1360)', () => {
+  const link = join(mkdtempSync(join(tmpdir(), 'evidence-link-')), 'repo')
+  symlinkSync(REPO, link)
+  const r = runHook({ last_assistant_message: PROPOSAL }, join(link, '.claude', 'hooks', 'evidence-line-gate.mjs'))
+  assert.equal(r.stdout, runHook({ last_assistant_message: PROPOSAL }).stdout)
   assert.deepEqual(r.audit.map((e) => [e.hook, e.decision]), [['evidence-line-gate', 'warn']])
 })
 
