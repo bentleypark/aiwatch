@@ -149,9 +149,20 @@ tags: [worker, kv, schema]
 
 Two consequences for anyone reading this key or its derivatives: **a stalled window looks like a quiet cron**, because the key simply stops growing — the skip logs at `console.error` and is counted on the daily summary's `Silent drops` line (#1257); and **a value that stays unusable stalls writes until the key's own TTL expires**, so clearing it is a manual step.
 
-**KV write budget** (Workers Paid / Standard plan): 1,000,000 writes/month included (~33,333/day); overage billed at $0.50 per additional 1M. Current estimated usage: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~72/day, 3 sources × 24 hourly cron, #274, #733 dropped Copilot) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day) + cron heartbeat (~288/day, #1501) + uptime showcase cache (~48/day per lazy Atlassian page, 13 pages in the 2026-10-27 traces, plus a write from each run that misses alongside another, #1489) ≈ **~6% of monthly inclusion** at one write per TTL. Existing throttling constants (e.g., `KV_WRITE_INTERVAL_MS = 600_000`) are retained for cost hygiene even though the hard free-tier limit no longer applies.
+**KV operation budget** (Workers Paid / Standard plan): each operation type has its own monthly allowance. Writes, deletes and lists are 1,000,000 each, then $5.00 per additional 1M; reads are 10,000,000, then $0.50 per 1M ([Cloudflare KV pricing](https://developers.cloudflare.com/kv/platform/pricing/)). Usage is not estimated here. Read it from Cloudflare's GraphQL Analytics API with `CF_ANALYTICS_TOKEN` from `worker/.dev.vars`:
 
-**A throttle is not a hard limit — the ~6% above is what says which.** Without that figure beside them the constants read as a ceiling. **Lengthening a TTL costs no extra writes** — the write cadence sets them, the TTL does not — so that question is bounded by value size and total storage, not by this budget. (Adding a `*/5` key is a different matter: that is ~288 writes/day on its own.)
+```bash
+set -a; . worker/.dev.vars; set +a
+FROM=$(date -u -v-31d +%F 2>/dev/null || date -u -d '31 days ago' +%F)
+TO=$(date -u -v-1d +%F 2>/dev/null || date -u -d '1 day ago' +%F)
+curl -s https://api.cloudflare.com/client/v4/graphql \
+  -H "Authorization: Bearer $CF_ANALYTICS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query":"query($f:Date!,$t:Date!){viewer{accounts(filter:{accountTag:\"11485987aa7d4639df5ba09d671b5615\"}){kvOperationsAdaptiveGroups(limit:1000,filter:{date_geq:$f,date_leq:$t},orderBy:[date_ASC]){sum{requests} dimensions{date actionType}}}}}","variables":{"f":"'"$FROM"'","t":"'"$TO"'"}}'
+```
+
+`actionType` is `read`, `write`, `delete` or `list`. The dataset's dimensions carry no key name, so it cannot say which key a write or delete went to; `kv-read-census.ts` attributes reads only. Keep the totals out of this public doc: `vitals:{YYYY-MM-DD}` is written once per page visit, so the write total can be turned back into a visit count. Existing throttling constants (e.g., `KV_WRITE_INTERVAL_MS = 600_000`) are retained for cost hygiene even though the hard free-tier limit no longer applies.
+
+**A throttle is not a hard limit — the measured share of the allowance is what says which.** **Lengthening a TTL costs no extra writes** — the write cadence sets them, the TTL does not — so that question is bounded by value size and total storage, not by this budget. (Adding a `*/5` key is a different matter: that is ~288 writes/day on its own.)
 
 **#1464 `sourceReadFailure` extension and lifecycle** — the bounded cause also covers Datadog `config.json`, Instatus scrape, RSS, Google Cloud `incidents.json`, and Better Stack `index.json`. Each `trackFetchFailure` update either replaces the stored bounded cause or clears it when the failure has no bounded cause; `resetFetchFailure` also clears it on a readable source. Once the failure count no longer advances past its threshold, the #1224 write-saving policy leaves the stored cause unchanged; it can therefore describe an observation up to the 30-minute count-decay window plus the next polling interval earlier.
 
