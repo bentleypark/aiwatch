@@ -1109,6 +1109,27 @@ describe('accumulateMonthlyIncidents', () => {
     expect(updated.resolvedAt).toBe('2026-04-01T11:30:00Z')
   })
 
+  it('#2046 a row banked before its title was tagged follows the live incident to tagged + English; an untagged row keeps its stored title', () => {
+    const run = (tagged: { title: string; autoMonitor?: true }, plain: { title: string }) => {
+      const svc = makeService('kimiapp', [
+        { id: 'k1', startedAt: '2026-11-19T09:25:13Z', status: 'investigating', duration: null },
+        { id: 'h1', startedAt: '2026-11-19T09:30:00Z', status: 'investigating', duration: null },
+      ])
+      Object.assign(svc.incidents[0], tagged)
+      Object.assign(svc.incidents[1], plain)
+      return svc
+    }
+    const first = accumulateMonthlyIncidents(null, [run({ title: 'API 服务可用性低' }, { title: 'Original' })], '2026-11', [])
+    expect(first.services.kimiapp.incidents![0]).not.toHaveProperty('autoMonitor')
+
+    const second = accumulateMonthlyIncidents(first, [run({ title: 'API service availability low', autoMonitor: true }, { title: 'Edited by provider' })], '2026-11', [])
+    const [k1, h1] = second.services.kimiapp.incidents!
+    expect(k1).toMatchObject({ title: 'API service availability low', autoMonitor: true })
+    expect(h1.title).toBe('Original')
+    expect(h1).not.toHaveProperty('autoMonitor')
+    expect(second.services.kimiapp.count).toBe(2)
+  })
+
   it('caps detail at MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE — drops oldest, keeps aggregates', () => {
     const overflow = MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE + 50
     const baseMs = Date.parse('2026-04-01T00:00:00Z')

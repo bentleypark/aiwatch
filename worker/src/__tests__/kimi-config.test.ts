@@ -112,6 +112,26 @@ describe('applyTitleMap (#989)', () => {
     }
   })
 
+  it('the availability-low alarm is tagged AND translated, in every spacing/casing variant', () => {
+    for (const t of ['API 服务可用性低', 'API服务可用性低', 'api 服务可用性低']) {
+      expect(isAutoMonitorIncident(mkInc({ title: t }), kimiapp), t).toBe(true)
+      expect(applyTitleMap([mkInc({ title: t })], kimi)[0].title, t).toBe('API service availability low')
+    }
+  })
+
+  it('the Google sign-in incident is translated but stays untagged (a human-written singleton)', () => {
+    for (const t of ['google登录异常', 'Google登录异常']) {
+      expect(applyTitleMap([mkInc({ title: t })], kimi)[0].title, t).toBe('Google login failure')
+      expect(isAutoMonitorIncident(mkInc({ title: t }), kimiapp), t).toBe(false)
+    }
+  })
+
+  it('a human-written API incident is NOT swept up by the availability-low pattern', () => {
+    for (const t of ['开放平台 API 服务异常', 'API 服务可用性低于预期说明', 'Kimi API 服务可用性低']) {
+      expect(isAutoMonitorIncident(mkInc({ title: t }), kimiapp), t).toBe(false)
+    }
+  })
+
   it('passes an UNMAPPED title through unchanged — never drops it', () => {
     const out = applyTitleMap([mkInc({ title: 'A brand-new human-written incident' })], kimi)
     expect(out).toHaveLength(1)
@@ -356,5 +376,60 @@ describe('kimiapp holds Moonshot\'s critical auto-monitor alarms (#1731)', () =>
     const inc = await onCard('搜索请求出现大量报错')
     const { autoMonitorCriticalHoldable: _, ...noFlag } = kimiapp
     expect(heldAt(inc, null, T0, noFlag as ServiceConfig)).toBe(false)
+  })
+})
+
+// #2046 — live 2026-11-19: sz25kxdwy6rs (17:25:13 CST) and 73z033sjrlnd (18:25:14 CST), both open,
+// `critical`, component `API Service`.
+describe('kimiapp tags the open availability-low alarm so repeats can group (#2046)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const T0 = Date.parse('2026-11-19T09:25:14.000Z')
+  const alarm = (id: string, createdAt: string) => ({
+    id, name: 'API 服务可用性低', status: 'investigating', impact: 'critical',
+    created_at: createdAt, started_at: createdAt, resolved_at: null, updated_at: createdAt,
+    incident_updates: [{ status: 'investigating', body: 'API 服务可用性低，可能会影响您的使用体验', created_at: createdAt }],
+    components: [{ id: 'rf64wcbxt3r2', name: 'API Service' }],
+  })
+  const fetchOpenAlarms = async () => {
+    const summary = {
+      status: { indicator: 'critical', description: 'Partial outage' },
+      components: [
+        { id: 'sttxgsd2bps7', name: 'Website', status: 'operational' },
+        { id: 'rf64wcbxt3r2', name: 'API Service', status: 'major_outage' },
+      ],
+      incidents: [
+        alarm('sz25kxdwy6rs', '2026-11-19T17:25:13.773+08:00'),
+        alarm('73z033sjrlnd', '2026-11-19T18:25:14.424+08:00'),
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    return fetchService(kimiapp, { summary: summary as never, incidents: null }, undefined, {})
+  }
+
+  it('both open incidents land on kimiapp, tagged and in English', async () => {
+    const svc = await fetchOpenAlarms()
+    expect(svc.incidents.map((i) => i.id).sort()).toEqual(['73z033sjrlnd', 'sz25kxdwy6rs'])
+    expect(svc.incidents.every((i) => i.autoMonitor === true)).toBe(true)
+    expect(svc.incidents.every((i) => i.title === 'API service availability low')).toBe(true)
+  })
+
+  it('neither lands on the kimi API card', async () => {
+    const summary = {
+      status: { indicator: 'critical', description: 'Partial outage' },
+      components: [{ id: '8psr5dfdld0s', name: 'Open API', status: 'operational' }],
+      incidents: [alarm('sz25kxdwy6rs', '2026-11-19T17:25:13.773+08:00')],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    expect((await fetchService(kimi, { summary: summary as never, incidents: null }, undefined, {})).incidents).toEqual([])
+  })
+
+  it('the alert hold is bounded: held inside FLAP_HOLD_MS, fires once the incident has been seen that long', async () => {
+    const inc = (await fetchOpenAlarms()).incidents[0]
+    const held = (firstSeenMs: number | null, nowMs: number) =>
+      shouldHoldNewIncident(kimiapp.id, kimiapp, inc, { alreadyAlerted: false, firstSeenMs, nowMs })
+    expect(held(null, T0)).toBe(true)
+    expect(held(T0, T0 + FLAP_HOLD_MS - 1)).toBe(true)
+    expect(held(T0, T0 + FLAP_HOLD_MS)).toBe(false)
   })
 })
