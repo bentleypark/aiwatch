@@ -295,3 +295,22 @@ start from `[]` (an empty start would republish the month and erase its history)
 freezes that month permanently — no further withdrawal is recorded in it until the KV value is
 repaired or deleted by hand. There is no POST: nothing an operator could edit here would be anything
 but a falsified history.
+
+# Operator Tools — restoring a permanent KV key from the `aiwatch-data` backup (#2034)
+
+The private `bentleypark/aiwatch-data` repo's `KV backup` workflow copies the permanent (no-expiration)
+`STATUS_CACHE` keys into `kv/` once a day, one file per key, committing only when a value changed. The file
+name is the key passed through `encodeURIComponent`; the file holds the value byte for byte. Which key
+prefixes are copied and which are left out is the `INCLUDE` / `EXCLUDE` lists in that repo's
+`scripts/kv-backup.mjs`.
+
+```bash
+cd ~/aiwatch-data && git pull
+git log --oneline -- 'kv/archive%3Amonthly%3A2026-10'        # pick the version to restore
+git show <commit>:'kv/archive%3Amonthly%3A2026-10' > /tmp/kv-restore.value
+KEY=$(node -e 'console.log(decodeURIComponent(process.argv[1]))' 'archive%3Amonthly%3A2026-10')
+cd <aiwatch checkout>
+npx wrangler kv key put "$KEY" --path /tmp/kv-restore.value --binding STATUS_CACHE --config worker/wrangler.toml --remote
+```
+
+Every backed-up key is permanent, so the put takes no `--ttl`.
