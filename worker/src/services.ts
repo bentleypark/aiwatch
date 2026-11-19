@@ -19,7 +19,7 @@ import {
 } from './parsers/rootly'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { fetchIncidentIoProxyHtml } from './parsers/incident-io-proxy'
-import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoReportedDays, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, parseIncidentIoScheduledMaintenances, correctIncidentIoImpossibleTimes, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoAllComponentUptimes, parseIncidentIoReportedUptime, parseIncidentIoReportedDays, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage, parseIncidentIoScheduledMaintenances, correctIncidentIoImpossibleTimes, preferEarlierImpactStart, parseIncidentIoPageStructure, applyIncidentIoPageStructure } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -3031,6 +3031,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched: Prefetche
       // other branches produced zero impossible records — but that is a measurement, not a guarantee,
       // and `buildHistoryRecord`'s own gate is what covers them for the store that cannot be re-derived.
       incidents = correctIncidentIoImpossibleTimes(incidents, uptimeHtml)
+      incidents = preferEarlierImpactStart(incidents, uptimeHtml)
       if (tagsNeedHtml) {
         // Must precede filterIncidents: a transform after the filter can't resurrect what it dropped (#940).
         const tagged = uptimeHtml

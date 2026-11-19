@@ -689,6 +689,19 @@ describe('#2042 — a row whose provider start moved to the previous month is mo
   })
 })
 
+describe('#2044 — 2026-10 rows re-timed to their impact start', () => {
+  const entries = Object.entries(ROW_REPLACEMENTS).filter(([name]) => name.endsWith('-impact-start'))
+
+  it('covers the four 2026-10 service-months measured, and none in an earlier month', () => {
+    expect(entries.map(([name]) => name).sort()).toEqual(['2026-10-chatgpt-impact-start', '2026-10-groq-impact-start', '2026-10-langfuse-impact-start', '2026-10-openai-impact-start'])
+  })
+
+  it.each(entries)('%s re-adds exactly the ids it removes, each ending after it starts', (_name, spec) => {
+    expect(spec.add.map((e) => e.id).sort()).toEqual([...spec.remove].sort())
+    for (const e of spec.add) expect(Date.parse(e.resolvedAt), e.id).toBeGreaterThan(Date.parse(e.startedAt))
+  })
+})
+
 // #1830 — a month with no incidents is archived with no `incidentList` key at all (6 of 46 services in
 // archive:monthly:2026-09 before this patch, fal among them), so rows can only be added to it if that absence reads as [].
 describe('#1830 — rows added to a service archived with no incidents', () => {

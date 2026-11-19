@@ -334,6 +334,12 @@ the predicate is `isTimeOrderImpossible` (utils.ts — **parsed** instants, neve
 payloads mix fractional-second precision and lexical order gets such pairs backwards) and never the
 duration string.
 
+**#2044 — an incident posted after its impact window opened.** The same `created_at` is the post time
+when the record is not inverted, so an incident posted hours into an outage was measured from the post.
+`preferEarlierImpactStart` (`parsers/incident-io.ts`, after `correctIncidentIoImpossibleTimes`) starts a
+resolved incident at the earlier of its post and its own impact window's start on the status page. In
+2026-09/10, 12 of 243 incident.io rows had an impact window opening before the post; the 2026-10 ones were patched with `ROW_REPLACEMENTS` (`*-impact-start`).
+
 **#1390 side effect, disclosed:** giving perplexity a `statusComponentId` also moved its Status Calendar
 from 14 days to 30, because `calendarDays` then derived as `statusComponentId ? 30 : 14`. #1406
 replaced that derivation (below); perplexity still draws 30.
