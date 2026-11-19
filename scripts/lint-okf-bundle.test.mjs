@@ -1,5 +1,5 @@
 // #891 Phase 4 — structural lint for the docs/reference OKF bundle.
-// Run with `npm run test:scripts` (= `node --test scripts/*.test.mjs`), which CI runs in test.yml.
+// Run with `npm run test:scripts`, which CI runs in test.yml.
 // Pins BOTH the pure check functions (fixtures) AND the real docs/reference bundle (must stay clean).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -33,22 +33,7 @@ export function summarizeRecoveryHistory(
   overrides: DurationOverride[],
   config: Pick<ServiceConfig, 'autoMonitorTitles' | 'titleMap'> = {},
 ): RecoveryBaseline | null {
-  const overrideMin = new Map(overrides.map((o) => [o.id, o.durationMin]))
-  const originalTitles = new Map<string, string[]>()
-  for (const [original, translated] of Object.entries(config.titleMap ?? {})) {
-    originalTitles.set(translated, [...(originalTitles.get(translated) ?? []), original])
-  }
-  const isPreStampAutoMonitor = (title: string) =>
-    [title, ...(originalTitles.get(title) ?? [])].some((t) => isAutoMonitorIncident({ title: t }, config))
-  const byIncId = new Map<string, { startedAt: string; durationMin: number }>()
-  for (const r of records) {
-    if (byIncId.has(r.incId)) continue
-    if (r.autoMonitor || isPreStampAutoMonitor(r.title) || isFeedEventTitle(r.title)) continue
-    const durationMin = overrideMin.get(r.incId) ?? r.durationMin
-    if (!(durationMin > 0)) continue
-    byIncId.set(r.incId, { startedAt: r.startedAt, durationMin })
-  }
-  const kept = [...byIncId.values()]
+  const kept = editorialRecoveryRecords(records, overrides, config)
   if (kept.length < RECOVERY_BASELINE_MIN_N) return null
   const sorted = kept.map((k) => k.durationMin).sort((a, b) => a - b)
   const mid = Math.floor(sorted.length / 2)
@@ -59,6 +44,32 @@ export function summarizeRecoveryHistory(
     p80Min: sorted[Math.ceil(0.8 * sorted.length) - 1],
     since: kept.map((k) => k.startedAt).sort()[0].slice(0, 10),
   }
+}
+
+export type RecoveryRecordInput = Pick<IncidentHistoryRecord, 'incId' | 'title' | 'startedAt' | 'durationMin' | 'autoMonitor'>
+
+/** Pure. The records `summarizeRecoveryHistory` counts, first occurrence per `incId`, with an override applied. */
+export function editorialRecoveryRecords<R extends RecoveryRecordInput>(
+  records: R[],
+  overrides: DurationOverride[],
+  config: Pick<ServiceConfig, 'autoMonitorTitles' | 'titleMap'> = {},
+): Array<R & { durationMin: number }> {
+  const overrideMin = new Map(overrides.map((o) => [o.id, o.durationMin]))
+  const originalTitles = new Map<string, string[]>()
+  for (const [original, translated] of Object.entries(config.titleMap ?? {})) {
+    originalTitles.set(translated, [...(originalTitles.get(translated) ?? []), original])
+  }
+  const isPreStampAutoMonitor = (title: string) =>
+    [title, ...(originalTitles.get(title) ?? [])].some((t) => isAutoMonitorIncident({ title: t }, config))
+  const byIncId = new Map<string, R & { durationMin: number }>()
+  for (const r of records) {
+    if (byIncId.has(r.incId)) continue
+    if (r.autoMonitor || isPreStampAutoMonitor(r.title) || isFeedEventTitle(r.title)) continue
+    const durationMin = overrideMin.get(r.incId) ?? r.durationMin
+    if (!(durationMin > 0)) continue
+    byIncId.set(r.incId, { ...r, durationMin })
+  }
+  return [...byIncId.values()]
 }
 
 /** Pure. One entry per service that clears the floor; services below it are absent. */

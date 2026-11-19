@@ -1,5 +1,5 @@
-// #541 — unit tests for the verify-after reminder logic. Run with `npm run test:scripts`
-// (= `node --test "scripts/*.test.mjs"`). Uses node:test (no vitest) since this is a CI/automation
+// #541 — unit tests for the verify-after reminder logic. Run with `npm run test:scripts`.
+// Uses node:test (no vitest) since this is a CI/automation
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
