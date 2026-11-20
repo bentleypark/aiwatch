@@ -308,6 +308,34 @@ describe('POST /api/admin/rebuild-archive', () => {
     expect(res.status).toBe(200)
   })
 
+  describe('a rebuild that collected no days says so (#1320)', () => {
+    it('marks the 200 emptyBuild when the build collected no days, and still writes', async () => {
+      const month = monthsAgo(6)
+      const { kv } = makeKV()
+
+      const res = await workerModule.fetch(req({ month }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+      expect(res.status).toBe(200)
+      const body = await res.json() as { daysCollected: number; emptyBuild?: boolean }
+      expect(body.daysCollected).toBe(0)
+      expect(body.emptyBuild).toBe(true)
+      expect((kv.put as unknown as { mock: { calls: string[][] } }).mock.calls.some((c) => c[0] === `archive:monthly:${month}`)).toBe(true)
+    })
+
+    it('does not mark a build that collected at least one day', async () => {
+      const { store, kv } = makeKV()
+      store['services:latest'] = JSON.stringify({ services: [makeService({ id: 'claude' })], cachedAt: '2026-05-01T00:00:00Z' })
+      store['history:2026-04-30'] = JSON.stringify({ claude: { ok: 288, total: 288, officialUptime: 99.11 } })
+
+      const res = await workerModule.fetch(req({ month: '2026-04', force: true }, { 'X-Admin-Key': 'test-admin-key' }), envWith(kv), ctx)
+
+      expect(res.status).toBe(200)
+      const body = await res.json() as { daysCollected: number; emptyBuild?: boolean }
+      expect(body.daysCollected).toBeGreaterThan(0)
+      expect(body.emptyBuild).toBeUndefined()
+    })
+  })
+
   it('still rebuilds a month fully inside the retention window', async () => {
     const { kv } = makeKV()
     const env = envWith(kv)
