@@ -31,6 +31,7 @@ describe('buildCspWithHashes (#482)', () => {
     expect(scriptSrc).toContain("'sha256-BBB'")
     expect(scriptSrc).not.toContain("'unsafe-inline'")
     expect(scriptSrc).toContain('https://www.googletagmanager.com')
+    expect(scriptSrc).toContain('https://t1.kakaocdn.net')
   })
 
   it('form-action lets the Kakao share SDK submit to its sharer and follow its login redirect (#1619)', () => {

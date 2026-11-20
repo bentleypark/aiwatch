@@ -23,9 +23,8 @@ describe('buildCsp (#482)', () => {
     const scriptSrc = value.split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src'))!
     expect(scriptSrc).toContain("'nonce-ABC123'")
     expect(scriptSrc).not.toContain("'unsafe-inline'")
-    // GA + Kakao origins still allowlisted
     expect(scriptSrc).toContain('https://www.googletagmanager.com')
-    expect(scriptSrc).toContain('https://t1.kakaocdn.net')
+    expect(scriptSrc).not.toContain('kakaocdn')
   })
 
   it('keeps unsafe-inline ON style-src (inline style="" attrs are not the #482 target)', () => {

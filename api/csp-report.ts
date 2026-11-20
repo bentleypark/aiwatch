@@ -44,7 +44,7 @@ export function summarizeCspReport(r: Record<string, unknown>): string {
   const directive = pick(DIRECTIVE_KEYS)
   const blocked = pick(BLOCKED_KEYS)
   const doc = pick(DOCUMENT_KEYS)
-  const file = pick(['source-file', 'sourceFile'])
+  const file = pick(SOURCE_KEYS)
   const line = pick(['line-number', 'lineNumber'])
   const where = file !== '?' ? ` src=${file}:${line}` : ''
   return `directive=${directive} blocked=${blocked} doc=${doc}${where}`
@@ -53,6 +53,7 @@ export function summarizeCspReport(r: Record<string, unknown>): string {
 const DIRECTIVE_KEYS = ['violated-directive', 'effectiveDirective', 'violatedDirective', 'effective-directive'] as const
 const BLOCKED_KEYS = ['blocked-uri', 'blockedURL', 'blockedUri'] as const
 const DOCUMENT_KEYS = ['document-uri', 'documentURL', 'documentUri'] as const
+const SOURCE_KEYS = ['source-file', 'sourceFile'] as const
 
 function reportField(r: Record<string, unknown>, keys: readonly string[]): string {
   for (const k of keys) {
@@ -63,23 +64,26 @@ function reportField(r: Record<string, unknown>, keys: readonly string[]): strin
 }
 
 /** #2026 — the fields the worker keeps (api/csp-report.ts logs vanish within the log window). */
-export function toViolationRecord(r: Record<string, unknown>): { directive: string; blocked: string; page: string } {
+export interface ViolationRecord { directive: string; blocked: string; page: string; source: string }
+
+export function toViolationRecord(r: Record<string, unknown>): ViolationRecord {
   return {
     directive: reportField(r, DIRECTIVE_KEYS).split(' ')[0],
     blocked: reportField(r, BLOCKED_KEYS),
     page: reportField(r, DOCUMENT_KEYS),
+    source: reportField(r, SOURCE_KEYS),
   }
 }
 
 export const MAX_FORWARDED = 5
 
-/** One record per distinct directive + blocked URL, at most MAX_FORWARDED per POST. */
-export function forwardableRecords(reports: Array<Record<string, unknown>>): Array<{ directive: string; blocked: string; page: string }> {
+/** One record per distinct directive + blocked URL + source, at most MAX_FORWARDED per POST. */
+export function forwardableRecords(reports: Array<Record<string, unknown>>): ViolationRecord[] {
   const seen = new Set<string>()
-  const out: Array<{ directive: string; blocked: string; page: string }> = []
+  const out: ViolationRecord[] = []
   for (const r of reports) {
     const rec = toViolationRecord(r)
-    const key = `${rec.directive} ${rec.blocked}`
+    const key = `${rec.directive} ${rec.blocked} ${rec.source}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(rec)

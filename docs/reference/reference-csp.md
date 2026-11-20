@@ -57,7 +57,7 @@ report-uri /api/csp-report; report-to csp
 - **Allowlisted origins** (browser-loaded only): GA4 `googletagmanager.com` (gtag.js) in script+connect;
   `google-analytics.com` + `region1.google-analytics.com` + `www.google.com` (GA4 beacons, #2026) in connect;
   `api.github.com` (SPA star count, #2026) in connect on `vercel.json` and `csp-nonce.ts` (the drift pin keeps those two equal); Kakao
-  `t1.kakaocdn.net` (share SDK, injected on is-down) in script, and `*.kakao.com` in **form-action** on the
+  `t1.kakaocdn.net` (share SDK, injected on is-down) in script and `*.kakao.com` in **form-action**, both on the
   hash-CSP pages only (`csp-hash.ts`) — the SDK form-POSTs to `sharer.kakao.com`, which redirects a
   logged-out viewer to `accounts.kakao.com`, and form-action is checked on every redirect (#1619); the **Worker origin** in connect (`/api/*`
   fetches) AND img (the status/uptime **badges** on ServiceDetails load from `<worker>/badge/<id>` — #482
