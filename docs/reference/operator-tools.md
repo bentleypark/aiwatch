@@ -149,7 +149,7 @@ archive, and answers:
 | **`409`** | the stored archive is unparseable, so the comparison could not be made at all. |
 | **`409`** | an archive is already stored and the body does not carry `resnapshot: true` (#1735). Nothing is built or written. |
 | **`400`** | the month is not a real calendar month, or has not ENDED yet — the current month included (#1274). |
-| **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. |
+| **`200`** | otherwise — including a first-ever build of an old month, where nothing is stored and so nothing can be lost. `emptyBuild: true` marks a build that collected no days (`daysCollected: 0`) (#1320). |
 
 **Fields judged by today's state are kept, not emptied (#1504).** Whether `officialUptime` and `components` are written, and the build-day score itself, are decided by today's `services:latest` and `SERVICES` config, so a past month can rebuild to nothing for them. Where the rebuild yields no value for any field the stored group holds, the stored group is kept whole, absences included; `carried` in the `200` response names each one. The groups are `BUILD_DAY_FIELD_GROUPS` in `monthly-archive.ts`; the official uptime and the build-day score are one group, so they are kept or replaced together. Otherwise the rebuilt group replaces the stored one, and incident aggregates always replace.
 

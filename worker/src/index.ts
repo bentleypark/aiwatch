@@ -2952,6 +2952,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     period: archive.period,
     services: Object.keys(archive.services).length,
     daysCollected: archive.daysCollected,
+    ...(archive.daysCollected === 0 ? { emptyBuild: true } : {}),
     servicesWithScore: Object.values(archive.services).filter((s) => s.score != null).length,
     overrides: { applied: overrideMatches.matched.length, notInThisMonth: overrideMatches.unmatched.length, appliedIds: overrideMatches.matched },
   })
