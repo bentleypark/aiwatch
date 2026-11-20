@@ -87,9 +87,8 @@ describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces vi
 
   it('allowlists the origins the SPA + Edge SSR actually load', () => {
     const csp = cspHeaderValue()
-    // external script (GA4 + Kakao SDK)
     expect(csp).toContain('https://www.googletagmanager.com')
-    expect(csp).toContain('https://t1.kakaocdn.net')
+    expect(csp).not.toContain('kakaocdn')
     // fetch targets (Worker API + GA4 collection)
     expect(csp).toContain('https://aiwatch-worker.p2c2kbf.workers.dev')
     expect(csp).toContain('https://www.google-analytics.com')
