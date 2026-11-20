@@ -43,6 +43,10 @@ the engineering gates below remain the same.
    For dashboard verification, set `ALLOWED_ORIGIN=*` in `worker/.dev.vars` and run the local
    Worker alongside Vite. When running multiple worktrees, offset each port by `+100` per slot and
    point `VITE_API_URL` at that worktree's Worker port.
+   Keep `AIWATCH_LOCAL=1` in `worker/.dev.vars` (the `.dev.vars.example` template carries it): the
+   local Worker then sends nothing to the operator Discord or ntfy and writes no production Vercel
+   Blob copy, though the same file carries those credentials (#2058). To check an alert's Discord
+   output locally, add `AIWATCH_LOCAL_ALERTS=1` for that run.
 8. For UI or Edge changes, obtain explicit user confirmation from the browser before committing.
    Curl, Playwright, and automated tests do not replace this confirmation. If the change requires
    a rare state, reproduce that state locally, verify it, and remove the temporary fixture before
