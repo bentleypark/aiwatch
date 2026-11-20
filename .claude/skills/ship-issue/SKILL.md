@@ -250,9 +250,7 @@ is the *procedure* — follow it top to bottom.
       what is left is "when X next happens, read Y", with no way to date X, close the issue by hand
       (use `refs #N` at merge, not `closes`) and put the reopen trigger in the closing comment as
       prose, not as an unchecked `- [ ]` box. It does not apply to a remainder the operator can
-      trigger today (a rebuild, a manual run): do that, or give it a dated `verify-after`. Nor to an
-      external integration whose real delivery has not been seen yet: that stays open until it is
-      seen, so ask.
+      trigger today (a rebuild, a manual run): do that, or give it a dated `verify-after`.
     - **Flip the initiative edge (#969).** If this issue advanced an Initiative, move its `advances:: #N`
       to `delivered:: #N` on the `initiative_*` memory page — the one moment that fact becomes true.
       `advances` means *pending*; a closed issue left on it is a lint finding. Add `(pin — why)` when the
