@@ -207,8 +207,8 @@ describe('daily summary re-asserts a bad archive (#1355 wiring)', () => {
   })
 
   it('reports a previous month that was never archived at all', async () => {
-    // The build path can leave no archive AND no alert: `kvPut` returns false rather than throwing, so
-    // the `catch` that writes `archive:failed:` and pings Discord never runs. Absence must therefore be
+    // The build path can leave no archive AND no alert: a read fault on the archive key skips the
+    // build, and a cron that misses both windows never revisits the month. Absence must therefore be
     // reported here rather than assumed covered elsewhere.
     const body = await runCron(makeKv('2026-08', 'absent'), '2026-09-15T09:02:00.000Z')
 

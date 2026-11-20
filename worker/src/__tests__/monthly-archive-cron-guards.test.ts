@@ -24,8 +24,10 @@ function makeKv(options: {
   faultOnArchive?: boolean
   servicesLatest?: string | null
   faultOnServicesLatest?: boolean
+  faultOnArchiveWrite?: boolean
 } = {}) {
   const puts: string[] = []
+  const putValues = new Map<string, string>()
   const failureMarkers = new Set<string>()
   const kv = {
     get: async (key: string) => {
@@ -48,14 +50,16 @@ function makeKv(options: {
       return null
     },
     getWithMetadata: async () => ({ value: null, metadata: null }),
-    put: async (key: string) => {
+    put: async (key: string, value: string) => {
+      if (key === ARCHIVE_KEY && options.faultOnArchiveWrite) throw new Error('KV PUT failed: 503 Service Unavailable')
       puts.push(key)
+      putValues.set(key, value)
       if (key.startsWith('archive:failed:')) failureMarkers.add(key)
     },
     delete: async () => {},
     list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
   } as unknown as KVNamespace
-  return { kv, puts }
+  return { kv, puts, putValues }
 }
 
 async function runCron(kv: KVNamespace, withDiscord = false) {
@@ -137,5 +141,34 @@ describe('month-end cron archive guards (#1317)', () => {
     await runCron(kv)
 
     expect(puts).not.toContain(ARCHIVE_KEY)
+  })
+
+  describe('a failed archive write (#1377)', () => {
+    it('alerts with the KV error as the reason and records that cause in the marker', async () => {
+      const { kv, puts, putValues } = makeKv({ servicesLatest: JSON.stringify(OPERATIONAL), faultOnArchiveWrite: true })
+
+      const fetchMock = await runCron(kv, true)
+
+      expect(puts).not.toContain(ARCHIVE_KEY)
+      expect(fetchMock).toHaveBeenCalledWith('https://example.invalid/hook', expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('KV PUT failed: 503 Service Unavailable'),
+      }))
+      expect(puts).toContain('archive:failed:2026-07')
+      expect(JSON.parse(putValues.get('archive:failed:2026-07') ?? 'null')).toMatchObject({
+        at: expect.any(String),
+        reason: expect.stringContaining('KV PUT failed: 503 Service Unavailable'),
+      })
+    })
+
+    it('stays silent when the write succeeds', async () => {
+      const { kv, puts } = makeKv({ servicesLatest: JSON.stringify(OPERATIONAL) })
+
+      const fetchMock = await runCron(kv, true)
+
+      expect(puts).toContain(ARCHIVE_KEY)
+      expect(puts).not.toContain('archive:failed:2026-07')
+      expect(fetchMock.mock.calls.filter(([, init]) => String((init as RequestInit | undefined)?.body ?? '').includes('Monthly archive build failed'))).toHaveLength(0)
+    })
   })
 })

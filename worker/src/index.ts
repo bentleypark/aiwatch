@@ -4174,13 +4174,9 @@ const workerExport = {
               apiKey: env.ANTHROPIC_API_KEY,
               serviceNames,
             }, undefined, overrideRead.state === 'ok' ? overrideRead.list : [])
-            const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
-            if (!writeOk) {
-              console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)
-            } else {
-              if (isArchiveCatchUp) console.log(`[monthly-archive] catch-up run for ${archive.period}`)
-              console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
-            }
+            await env.STATUS_CACHE.put(archiveKey, JSON.stringify(archive))
+            if (isArchiveCatchUp) console.log(`[monthly-archive] catch-up run for ${archive.period}`)
+            console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
           } catch (err) {
             const detail = err instanceof Error ? err.message : String(err)
             console.error('[monthly-archive] Failed:', err)
@@ -4199,7 +4195,7 @@ const workerExport = {
                 if (!sent) {
                   console.error(`[monthly-archive] failure alert NOT delivered for ${archiveKey}`)
                 } else {
-                  await kvPut(env.STATUS_CACHE, failureNotifiedKey, '1', { expirationTtl: 60 * 24 * 60 * 60 })
+                  await kvPut(env.STATUS_CACHE, failureNotifiedKey, JSON.stringify({ at: now.toISOString(), reason: sanitize(detail) }), { expirationTtl: 60 * 24 * 60 * 60 })
                 }
               }
             }
@@ -4607,12 +4603,10 @@ const workerExport = {
             if (!previousMonthArchivePending(now)) try {
               const raw = await env.STATUS_CACHE.get(`archive:monthly:${shortArchivePeriod}`)
               if (raw === null) {
-                // ABSENT is reported, not skipped. The build path can fail silently: `kvPut` returns
-                // `false` instead of throwing, so the `catch` that writes `archive:failed:` and pings
-                // Discord is never entered; a read fault on the archive key skips the build with only a
-                // `console.error`; and a cron that misses both windows never revisits the month. Any of
-                // those leaves no archive AND no alert. On the 1st the build is still ahead (12:00Z,
-                // #1627), so the check waits for the 2nd.
+                // ABSENT is reported, not skipped. The build path can fail silently: a read fault on
+                // the archive key skips the build with only a `console.error`, and a cron that misses
+                // both windows never revisits the month. Either leaves no archive AND no alert. On the
+                // 1st the build is still ahead (12:00Z, #1627), so the check waits for the 2nd.
                 archiveHealth = { state: 'missing', period: shortArchivePeriod }
               } else {
                 const parsed = JSON.parse(raw)

@@ -2682,10 +2682,10 @@ export interface ShortArchive {
 }
 
 // What the daily check found about the previous month's permanent record. `missing` is a SEPARATE
-// state, not an absence of verdict: a `kvPut` write failure returns `false` rather than throwing
-// (utils.ts), so the archive-build `catch` — the only thing that writes `archive:failed:{period}` and
-// pings Discord — is not entered on that path. A month that was never written can therefore reach this
-// check unannounced, and it is worse than one short by a day.
+// state, not an absence of verdict: a read fault on the archive key skips the build, and a cron that
+// misses both windows never revisits the month, so the archive-build `catch` — the only thing that
+// writes `archive:failed:{period}` and pings Discord — is not entered on those paths. A month that was
+// never written can therefore reach this check unannounced, and it is worse than one short by a day.
 export type ArchiveHealth =
   | ({ state: 'short' } & ShortArchive)
   | { state: 'missing'; period: string }
