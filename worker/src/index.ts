@@ -35,6 +35,7 @@ import { checkLateResolutions } from './late-resolution'
 import { runMistralPublicApiProbe } from './mistral-public-api'
 import { handleMistralEmail } from './mistral-email'
 import { recordCronHeartbeat, checkCronHeartbeat, createWatchdogThrottle, WATCHDOG_INTERVAL_MS } from './cron-heartbeat'
+import { withLocalOutboundMuted } from './local-outbound'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp } from './detection'
 import { XREPLY_PATH, buildXReplyMarkMessage, handleXReplyMarkRequest, xReplyMarkTarget } from './x-reply-mark'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -458,7 +459,10 @@ export async function runStatusRefresh(env: Env, writeCounters: boolean, detectC
 /** #1910 — singleton Durable Object. A cached read asks it for a run; its alarm runs one at a time, with no
  *  client attached, so a slow run is not cancelled the way a request's `waitUntil` is after 30 s. */
 export class StatusRefresher {
-  constructor(private readonly state: DurableObjectState, private readonly env: Env) {}
+  private readonly env: Env
+  constructor(private readonly state: DurableObjectState, env: Env) {
+    this.env = withLocalOutboundMuted(env)
+  }
 
   async fetch(): Promise<Response> {
     const storage = this.state.storage
@@ -3332,7 +3336,7 @@ const workerExport = {
     // `ai-analysis.ts` uses), i.e. the instrument breaking the thing it measures, invisibly.
     const kvCensus = createReadCensus()
     const censusedKv = rawEnv.STATUS_CACHE ? kvCensus.wrapKv(rawEnv.STATUS_CACHE) : undefined
-    const env: Env = new Proxy(rawEnv, {
+    const env: Env = new Proxy(withLocalOutboundMuted(rawEnv), {
       get: (target, prop) => (prop === 'STATUS_CACHE' && censusedKv) ? censusedKv : Reflect.get(target, prop),
     })
     discordSendLogKv = env.STATUS_CACHE
@@ -4899,7 +4903,7 @@ const workerExport = {
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startedAt = Date.now()
-    return withServerTiming(request, startedAt, await workerExport.handleFetch(request, env, ctx))
+    return withServerTiming(request, startedAt, await workerExport.handleFetch(request, withLocalOutboundMuted(env), ctx))
   },
 
   async handleFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

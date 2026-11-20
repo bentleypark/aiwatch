@@ -1,3 +1,8 @@
+# Marks this as a local worker: it then sends no operator Discord/ntfy alert and writes no
+# production Vercel Blob copy (#2058). AIWATCH_LOCAL_ALERTS=1 turns the alerts back on for a
+# local check of an alert's Discord output.
+AIWATCH_LOCAL=1
+
 # Allowed origins for CORS (use * for local development)
 ALLOWED_ORIGIN=*
 
