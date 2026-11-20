@@ -82,9 +82,14 @@ describe('forwardCspReports (#2026)', async () => {
 
   it('maps both wire formats onto the record the worker parses', () => {
     expect(toViolationRecord({ 'violated-directive': 'connect-src https://x', 'blocked-uri': 'https://www.google.com/g/collect', 'document-uri': 'https://ai-watch.dev/intro' }))
-      .toEqual({ directive: 'connect-src', blocked: 'https://www.google.com/g/collect', page: 'https://ai-watch.dev/intro' })
+      .toEqual({ directive: 'connect-src', blocked: 'https://www.google.com/g/collect', page: 'https://ai-watch.dev/intro', source: '' })
     expect(toViolationRecord({ effectiveDirective: 'img-src', blockedURL: 'https://a.com/p.gif', documentURL: 'https://ai-watch.dev/' }))
-      .toEqual({ directive: 'img-src', blocked: 'https://a.com/p.gif', page: 'https://ai-watch.dev/' })
+      .toEqual({ directive: 'img-src', blocked: 'https://a.com/p.gif', page: 'https://ai-watch.dev/', source: '' })
+  })
+
+  it('carries the source-file of either wire format (#2052)', () => {
+    expect(toViolationRecord({ 'violated-directive': 'script-src', 'blocked-uri': 'eval', 'source-file': 'chrome-extension', 'line-number': 3 }).source).toBe('chrome-extension')
+    expect(toViolationRecord({ effectiveDirective: 'script-src-elem', blockedURL: 'inline', sourceFile: 'https://ai-watch.dev/assets/x.js' }).source).toBe('https://ai-watch.dev/assets/x.js')
   })
 
   it('posts one record per report to the worker chosen by the request host, carrying the page origin', async () => {
@@ -94,7 +99,7 @@ describe('forwardCspReports (#2026)', async () => {
     const calls = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
     expect(calls.map((c) => c[0])).toEqual(['https://aiwatch-worker.p2c2kbf.workers.dev/api/csp-violation', 'https://aiwatch-worker.p2c2kbf.workers.dev/api/csp-violation'])
     expect((calls[0][1].headers as Record<string, string>).Origin).toBe('https://ai-watch.dev')
-    expect(JSON.parse(String(calls[0][1].body))).toEqual({ directive: 'connect-src', blocked: 'https://x.com/', page: '' })
+    expect(JSON.parse(String(calls[0][1].body))).toEqual({ directive: 'connect-src', blocked: 'https://x.com/', page: '', source: '' })
   })
 
   it('a worker failure does not change the 204', async () => {
@@ -117,6 +122,14 @@ describe('forwarding is bounded and reports its failures (#2026)', async () => {
     expect(forwardableRecords(same)).toHaveLength(1)
     const distinct = Array.from({ length: 5000 }, (_, i) => ({ effectiveDirective: 'connect-src', blockedURL: `https://h${i}.com/` }))
     expect(forwardableRecords(distinct)).toHaveLength(MAX_FORWARDED)
+  })
+
+  it('keeps a page violation and an extension violation of the same kind apart (#2052)', () => {
+    const recs = forwardableRecords([
+      { effectiveDirective: 'script-src', blockedURL: 'eval', sourceFile: 'chrome-extension' },
+      { effectiveDirective: 'script-src', blockedURL: 'eval', sourceFile: 'https://ai-watch.dev/assets/x.js' },
+    ])
+    expect(recs.map((r) => r.source)).toEqual(['chrome-extension', 'https://ai-watch.dev/assets/x.js'])
   })
 
   it('an opaque `null` Origin falls back to the request origin', async () => {
