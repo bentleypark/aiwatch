@@ -164,7 +164,8 @@ is the *procedure* — follow it top to bottom.
    - `closes #N` **only when ALL checklist items are done AND verified** — this includes
      time/production-gated verification (e.g. "queryable after deploy", "shows after next cron"):
      if such an item can't be verified yet, it's a **remaining** item → use **`refs #N`** and close
-     manually after verifying (do NOT let `closes` auto-close it prematurely).
+     manually after verifying, or per the undated-event rule in step 12 (do NOT let `closes`
+     auto-close it prematurely).
    - **Production-gated → add a `verify-after` line (#541)** so the check isn't forgotten: when an
      item needs a production-data check after a delay, add a line to the issue body
      `- [ ] **verify-after YYYY-MM-DD** — what to check + where` (pick a realistic date). The daily
@@ -245,6 +246,13 @@ is the *procedure* — follow it top to bottom.
 12. **Close** — only after verification: `gh issue close N`. Unverified/not-yet-done items remain → keep the
     issue open with a label (`U3-someday`) whose **exit condition is written in the body** (e.g. "close when secrets set
     & data confirmed"). Never close immediately after merge.
+    - **Undated-event rule — the exception to the keep-open rule above.** When every box is ticked and
+      what is left is "when X next happens, read Y", with no way to date X, close the issue by hand
+      (use `refs #N` at merge, not `closes`) and put the reopen trigger in the closing comment as
+      prose, not as an unchecked `- [ ]` box. It does not apply to a remainder the operator can
+      trigger today (a rebuild, a manual run): do that, or give it a dated `verify-after`. Nor to an
+      external integration whose real delivery has not been seen yet: that stays open until it is
+      seen, so ask.
     - **Flip the initiative edge (#969).** If this issue advanced an Initiative, move its `advances:: #N`
       to `delivered:: #N` on the `initiative_*` memory page — the one moment that fact becomes true.
       `advances` means *pending*; a closed issue left on it is a lint finding. Add `(pin — why)` when the

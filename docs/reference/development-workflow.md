@@ -137,7 +137,8 @@ Then run the Monthly Reports command from the table above.
 16. Verify the Vercel Preview for frontend changes. Worker deployment is a separate, approved,
     sequential operation using `npm run deploy:worker`; confirm the output says `Uploaded aiwatch-worker`.
 17. After merge, re-read the issue, verify every checklist item against the shipped code, and close
-    only when no unverified or deferred item remains. Keep production-gated work open with this
+    only when no unverified or deferred item remains (bar the undated-event rule in `ship-issue`
+    step 12). Keep production-gated work open with this
     canonical issue-body structure at the bottom:
 
     ```md
