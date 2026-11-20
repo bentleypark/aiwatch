@@ -71,7 +71,8 @@ skill is the periodic backstop — run it over the whole open board.
    Agent tool) — "the write half shipped" ≠ "done".
    - A **time/production-gated** item ("queryable after deploy", "shows after N months of archives")
      that can't be checked yet is a **remaining** item → keep the issue open with a labeled exit
-     condition; do NOT close on the strength of code alone.
+     condition; do NOT close on the strength of code alone, unless the undated-event rule in
+     `ship-issue` step 12 applies.
 
 4. **Label hygiene**: every `U3-someday`/`tracking` issue must carry a **written exit condition** in its
    body ("close when X"). If the condition has cleared → close or drop the label. If a label has no
