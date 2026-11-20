@@ -4843,11 +4843,12 @@ const workerExport = {
             }
 
             if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
-            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
               title: `📊 AIWatch Daily Report — ${today}`,
               description,
               color: 0x9B59B6, // purple
             })
+            if (!sent) throw new Error(`Discord send failed (description ${description.length} chars)`)
             // Mark today's summary as done (prevents re-send on subsequent cron cycles)
             await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
 
