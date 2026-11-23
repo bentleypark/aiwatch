@@ -181,6 +181,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   langsmith: 'langchain',
   deepseekapp: 'deepseek-app',
   kimiapp: 'kimi-app', // #1731
+  kimicode: 'kimi-code', // #1690
   grokbot: 'grok-bot', // #1837
   bfl: 'flux', // #756
   fishaudio: 'fish-audio', // #1549

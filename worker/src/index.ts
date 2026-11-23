@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, recordFeedDepthGaps, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditServices, uptimeScopeOf, type ServiceStatus } from './services'
+import { fetchAllServices, recordFeedDepthGaps, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditPages, uptimeScopeOf, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { edgeFallbackLead } from './edge-fallback-text'
@@ -3812,12 +3812,13 @@ const workerExport = {
         // here either — its `data-…-since-value` turned out to be the CHART'S shared window start,
         // identical across every component (verified live), not a per-component date. See
         // discord-alert-paths.md for the full account.
-        for (const config of atlassianRosterAuditServices()) {
+        for (const page of atlassianRosterAuditPages()) {
+          const label = page.serviceNames.join(', ')
           try {
-            const componentsUrl = config.componentsUrl ?? config.apiUrl!
+            const componentsUrl = page.componentsUrl
             const componentsRes = await fetchWithTimeout(componentsUrl, 8000)
             if (!componentsRes.ok) {
-              console.warn(`[cron] roster audit (atlassian): ${config.id} components fetch returned HTTP ${componentsRes.status} — skipping this cycle`)
+              console.warn(`[cron] roster audit (atlassian): ${label} components fetch returned HTTP ${componentsRes.status} — skipping this cycle`)
               componentsRes.body?.cancel()
               continue
             }
@@ -3826,29 +3827,29 @@ const workerExport = {
             const names = new Map<string, string>()
             for (const c of rawComponents) if (typeof c.name === 'string') names.set(c.id, c.name)
             if (rawComponents.length === 0) {
-              console.warn(`[cron] roster audit (atlassian): ${config.id} returned 200 but no usable component ids — treating as unreadable, skipping this cycle`)
+              console.warn(`[cron] roster audit (atlassian): ${label} returned 200 but no usable component ids — treating as unreadable, skipping this cycle`)
               continue
             }
             const entries = atlassianRosterEntries(rawComponents)
-            const scopeIds = uptimeScopeOf(config)
-            const agedIn = rosterAgedInFindings(entries, scopeIds, config.rosterAuditExclude ?? [], config.rosterAuditFixedScope ?? false, Date.now())
-            const agedInKey = `roster-audit-seen:${config.statusUrl}:agedin`
+            const scopeIds = page.scopeIds
+            const agedIn = rosterAgedInFindings(entries, scopeIds, page.exclude, page.fixedScope, Date.now())
+            const agedInKey = `roster-audit-seen:${page.statusUrl}:agedin`
             const seenRaw = await env.STATUS_CACHE.get(agedInKey).catch(() => null)
             const prevSeen = (() => { if (seenRaw === null) return null; try { const p = JSON.parse(seenRaw); return Array.isArray(p) ? p : null } catch { return null } })()
             const diff = nextRosterFindingSeen(prevSeen, agedIn)
             if (diff.toAlert.length > 0) {
               const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-                title: `📋 Roster audit: ${config.name}`,
-                description: formatRosterAuditAlert([config.name], diff.toAlert, names),
+                title: `📋 Roster audit: ${label}`,
+                description: formatRosterAuditAlert(page.serviceNames, diff.toAlert, names),
                 color: 0x3B82F6,
               })
               if (sent) await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(diff.nextSeen))
-              else console.error(`[cron] roster audit alert for ${config.id} was NOT delivered — not deduped, retries at tomorrow's run`)
+              else console.error(`[cron] roster audit alert for ${label} was NOT delivered — not deduped, retries at tomorrow's run`)
             } else if (diff.nextSeen.length !== (prevSeen ?? []).length) {
               await kvPut(env.STATUS_CACHE, agedInKey, JSON.stringify(diff.nextSeen))
             }
           } catch (err) {
-            console.error(`[cron] roster audit (atlassian) failed for ${config.id}:`, err instanceof Error ? err.message : err)
+            console.error(`[cron] roster audit (atlassian) failed for ${label}:`, err instanceof Error ? err.message : err)
           }
         }
 

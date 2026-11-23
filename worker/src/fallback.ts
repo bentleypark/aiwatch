@@ -52,8 +52,8 @@ export const API_TIER: Record<string, number> = {
   // Tier 9 = Embeddings + reranking (#880 / #601 Phase 5). Voyage + Jina recommend each other; voyageai
   // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members.
   voyageai: 9, jina: 9,
-  // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
-  claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
+  // Tier 11 = Coding agents (#1027) — one tier for all of them; multi-form (CLI + IDE), Score-ordered.
+  claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, kimicode: 11,
   // App-category services. All six share tier 21, so same-tier distance collapses to 0
   // across every pairing and ordering reduces to Score — identical to the pre-#403 `?? 99`
   // fall-through, just without the warn-once noise. Entries exist only to suppress the

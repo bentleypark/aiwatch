@@ -870,7 +870,7 @@ describe('renderFooter — Also check category grouping', () => {
 
   it('omits a category sub-label entirely when that category has no remaining services', () => {
     // `claude-code` (agent) relates to claude, cursor, github-copilot, windsurf,
-    // codex, junie. Every other agent is either current or related → the
+    // codex, junie, kimi-code. Every other agent is either current or related → the
     // Coding Agents group is empty and must not render a stray "Coding Agents:"
     // label. LLM APIs + AI Apps groups remain.
     const html = renderFooter('claude-code')

@@ -26,6 +26,14 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 - **For an incident.io page, `display_uptime_mode` does NOT decide whether we can compute uptime.** `'chart_and_percentage'` publishes a number; `'chart_only'` emits `"uptime":"$undefined"`, but that field is not what we read — `computeIncidentIoUptime` derives a figure from `data_available_since` + `component_impacts`, so a `chart_only` page still gets one. Replicate moved to the dedicated Cloudflare Status v3 path in #1384.
 - **Thin sources → the service renders like Azure OpenAI** (operational, "No official uptime", `score` withheld at low confidence, ~never an incident) — a near-empty card that lowers dashboard quality. **gcloud-`incidents.json`-only services are thin** (Veo/Imagen/STT/Vertex Vector — #680 held for this reason). Gemini looks rich only because it ALSO merges the AI Studio source (`aistudioStatus`).
 - **Prefer candidates that are BOTH data-rich AND fill a single-service category gap** (#601). If a thin category (video/image/vector/observability/embeddings) needs a sibling, pick a Better Stack / Atlassian / incident.io competitor over a gcloud product. The per-category shortlists — and the sources already declined — are in **[service-candidates.md](service-candidates.md)**; a row there means "the page is parseable", NOT that it passes this audit.
+- **Measure the probe candidate from a Workers egress as well (#1690).** The script measures from the machine it runs on, and a host can
+  answer differently to Cloudflare's network: `api.kimi.com` answered 401 locally but 403 on every path in about 2 ms from a Worker
+  (`wrangler dev --remote`), so the card probes `api.kimi.ai`. A probe that answers its controls identically measures a block, not the gateway.
+- **A product that is a GROUP on a shared Atlassian page: track the members, not the group (#1690).** The group's own uptime timeline
+  averages its members, so one member's outage reads as a sixth of it (Kimi Code: 89.77% worst-of vs 97.74% on the group). Use
+  `statusComponentIds` = the members (a badge and uptime worst-of, primary first) and scope incidents by a title prefix, since
+  `incidentComponents` matches names exactly and would drop an incident tagged before a rename. A member the page adds then ages into the
+  roster audit, which runs once per `statusUrl` over the union of the services that share it.
 - Record the audit verdict (and the source URLs you checked) in the issue before implementing.
 - Measure the rows with `node scripts/service-step0.mjs measure` (the card's own component ids, every number
   labelled by its scope) and attach its block to the issue; `check` refuses a block with an unmeasured row.

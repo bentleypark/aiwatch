@@ -81,8 +81,8 @@ describe('PROBE_TARGETS', () => {
     'speechmatics', // #1973
   ]
 
-  it('has all 37 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(37)
+  it('has all 38 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(38)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

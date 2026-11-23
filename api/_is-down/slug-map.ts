@@ -92,6 +92,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
   'junie':           { id: 'junie',       name: 'Junie',           provider: 'JetBrains',   category: 'agent', group: 'agents' },
+  'kimi-code':       { id: 'kimicode',    name: 'Kimi Code',       provider: 'Moonshot AI', category: 'agent', group: 'agents' },
 }
 
 // Related services for cross-linking (SEO internal links)
@@ -102,7 +103,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   // Phase A
   'claude-api':     ['claude-ai', 'claude-code', 'openai-api', 'chatgpt'],
   'claude-ai':      ['claude-api', 'chatgpt', 'claude-code'],
-  'claude-code':    ['claude-api', 'cursor', 'github-copilot', 'devin-desktop', 'codex', 'junie'],
+  'claude-code':    ['claude-api', 'cursor', 'github-copilot', 'devin-desktop', 'codex', 'junie', 'kimi-code'],
   'chatgpt':        ['claude-ai', 'openai-api', 'claude-api', 'gemini'],
   'openai-api':     ['chatgpt', 'claude-api', 'gemini', 'mistral', 'cohere'],
   'gemini':         ['openai-api', 'claude-api', 'chatgpt'],
@@ -111,6 +112,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'devin-desktop':  ['cursor', 'github-copilot', 'claude-code', 'codex', 'junie'],
   'codex':          ['github-copilot', 'cursor', 'devin-desktop', 'claude-code', 'junie'],
   'junie':          ['cursor', 'github-copilot', 'claude-code', 'codex', 'devin-desktop'],
+  'kimi-code':      ['claude-code', 'codex', 'cursor', 'github-copilot', 'devin-desktop'],
   // LLM APIs — same-tier alternatives
   'mistral':        ['cohere', 'groq', 'together', 'openai-api', 'claude-api'],
   'cohere':         ['mistral', 'groq', 'together', 'openai-api'],
@@ -230,6 +232,7 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   // Coding agents
   cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://devin.ai/desktop',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
+  kimicode: 'https://www.kimi.com/code',
   // Apps
   chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com', kimiapp: 'https://www.kimi.com',
 }

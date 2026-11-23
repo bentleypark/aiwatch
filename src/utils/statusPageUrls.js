@@ -56,4 +56,5 @@ export const STATUS_URL = {
   windsurf:    'https://www.devinstatus.com',
   junie:       'https://status.jetbrains.cloud', // #1004 — moved off status.jetbrains.ai (Atlassian → incident.io)
   codex:       'https://status.openai.com',
+  kimicode:    'https://status.moonshot.cn', // #1690
 }

@@ -100,6 +100,7 @@ Grouped by the dashboard's category taxonomy (sidebar filters / Overview section
 | GitHub Copilot | GitHub |
 | Windsurf (Devin Desktop) | Cognition |
 | Junie | JetBrains |
+| Kimi Code | Moonshot AI |
 
 ### Voice
 
@@ -358,6 +359,7 @@ Every monitored service — the same ids `/api/v1/status` returns.
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
 | `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
+| `kimicode` | Kimi Code | | |
 
 ## Claude Code Statusline Integration
 

@@ -52,6 +52,9 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From
   // <build>…") but 404s garbage → representative gateway, NOT a CDN catch-all (unlike windsurf.com).
   { id: 'cursor', url: 'https://api2.cursor.sh/' },                                 // 200, real API gateway
+  // #1690 — the Kimi Code plan's overseas API base (official docs). From Workers, /models answers 401 (~0.4s) where the sibling /v1/models and a
+  // garbage path answer 404. api.kimi.com answers every path 403 in ~2ms from Workers, so it would measure a block, not the gateway.
+  { id: 'kimicode', url: 'https://api.kimi.ai/coding/v1/models' },                  // 401 from Workers, distinct from its controls
   // #921 — Character.AI's official Statuspage has been dead since ~2026-06-18 (the exact response has
   // moved: 401 "page inactive" when this was written, 302 -> /page-deleted -> 200 HTML as of 2026-08-20)
   // (#689/#800, statusSourceDeactivated) with no first-party replacement, leaving the card a dead

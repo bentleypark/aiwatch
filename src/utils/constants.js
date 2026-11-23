@@ -37,7 +37,7 @@ export const API_SERVICE_IDS = [
 export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp', 'grok', 'kimiapp', 'grokbot']
 
 // Coding agents
-export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie']
+export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie', 'kimicode']
 
 // Display order: app → LLM → voice → inference → agent
 export const SERVICE_AND_APP_IDS = [
@@ -71,7 +71,7 @@ export const NO_SERVICES = Object.freeze([])
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'xai', 'mistral', 'bedrock', 'azureopenai', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'deepseek', 'kimi', 'openrouter'] },
-  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
+  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie', 'kimicode'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio', 'speechmatics'] }, // #658 — STT/TTS
   inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'jina', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
@@ -130,6 +130,7 @@ export const SERVICE_SITE_URL = {
   // Coding agents
   cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://devin.ai/desktop',
   junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
+  kimicode: 'https://www.kimi.com/code',
   // Apps
   chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com', grok: 'https://grok.com', kimiapp: 'https://www.kimi.com',
 }
@@ -173,6 +174,7 @@ const FEED_SLUG_OVERRIDE = {
   langsmith:   'langchain',
   deepseekapp: 'deepseek-app',
   kimiapp: 'kimi-app', // #1731
+  kimicode: 'kimi-code', // #1690
   grokbot: 'grok-bot', // #1837
   bfl:         'flux', // #756 — SEO-friendly "is flux down" slug
   fishaudio:   'fish-audio', // #1549

@@ -193,6 +193,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Does Junie work in every JetBrains IDE?', a: 'No — JetBrains ships the Junie plugin for a subset of its IDEs, each with its own minimum version. Check JetBrains\' documentation for the one you use.' },
     ],
   },
+  'kimi-code': {
+    displayName: 'Kimi Code',
+    description: 'Kimi Code is Moonshot AI\'s AI coding service, included in Kimi membership benefits. It reads code, edits files and runs commands through the Kimi Code Desktop app, the CLI and a VS Code extension, and subscribers can also use an API key in third-party tools such as Claude Code.',
+    insight: 'Kimi Code shares status.moonshot.cn with Moonshot AI\'s Kimi API and Kimi App. AIWatch follows the page\'s Kimi Code group, and Moonshot publishes the incident titles in Chinese.',
+    whenDown: 'When Kimi Code is down, the Kimi Code Desktop app, the CLI, the VS Code extension and third-party tools that use a Kimi Code API key may fail or respond slowly.',
+    faqs: [
+      { q: 'Is Kimi Code down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Kimi Code every 5 minutes via the Moonshot AI status page and shows real-time operational status.' },
+      { q: 'Why is Kimi Code slow today?', a: 'Moonshot AI\'s status page records Kimi Code slowdowns as incidents on the affected model, such as elevated time to first token or reduced output speed. Check this page for active incidents.' },
+      { q: 'What are alternatives to Kimi Code?', a: 'When Kimi Code is down, Claude Code, Codex, Cursor, GitHub Copilot, or Windsurf (Devin Desktop) are alternative AI coding agents. AIWatch shows which are currently operational.' },
+      { q: 'Is Kimi Code the same as the Kimi API or the Kimi app?', a: 'No. Moonshot AI lists Kimi Code as its own group on the shared status page, separate from the Kimi API and the Kimi app, and AIWatch tracks it as a separate service.' },
+    ],
+  },
   // Phase B — LLM APIs (#263)
   mistral: {
     displayName: 'Mistral',

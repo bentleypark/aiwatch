@@ -82,6 +82,7 @@
     { "source": "/is-character-ai-down", "destination": "/api/is-down?slug=character-ai" },
     { "source": "/is-codex-down", "destination": "/api/is-down?slug=codex" },
     { "source": "/is-junie-down", "destination": "/api/is-down?slug=junie" },
+    { "source": "/is-kimi-code-down", "destination": "/api/is-down?slug=kimi-code" },
     { "source": "/intro", "destination": "/api/intro" },
     { "source": "/methodology", "destination": "/api/methodology" },
     { "source": "/plugin", "destination": "/api/plugin" },

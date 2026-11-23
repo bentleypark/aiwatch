@@ -66,6 +66,7 @@ describe('#1679 — every service\'s uptime scope is pinned', () => {
         "junie": "incident.io 01KX3EN535A0SKSZK3S84949V1",
         "kimi": "atlassian 8psr5dfdld0s",
         "kimiapp": "atlassian sttxgsd2bps7,ckrtmmv96r2z,x3z9ydzr6ywk,smbb3z35s0jl,rf64wcbxt3r2,x0zsqgy57b75,8rkd3yj051gl,lk7q3z0fcylp,p1j9ttb7jwhp,wmn9wzv84k1v,z2zfp65lvb2z",
+        "kimicode": "atlassian t1ffjsrj7j9d,qhrvl9ccfvp6,1l34rxbvx0gt,bs3h7057mc6g,qrqn4ss6d252,dyw7p8553q3z",
         "langfuse": "incident.io 01KS5BHY7AKJD8YEM4MFYMB35Z,01KS5BHY7AX99XYA7AS7AAP7QG,01KS5BHY7AH52EZHZQ9TYD53TY",
         "langsmith": "incident.io 01KX6FV0RR5XXJ0SM3NXZRKMBY,01KX6FV0RRSSTKC5V2GPAMCEQR,01KX6FV0RRKA56PXCRWEHJTMXM,01KX6FV0RR46HM5EVSKG4BVY01,01KX6FV0RRY9DS9G7ZGB46MQQ2,01KX6FV0RRSDVTKHP03BBR1799,01KX6FV0RRHHPK0Y474ESRYV0X,01KX6FV0RR6F81Q8VM6KMACNXQ,01KX6FV0RR0E7AJPG60HR2ZTT9,01M26K8BYHD6NJP0PMEPB8S0RV",
         "luma": "betterstack page resources except Website",
