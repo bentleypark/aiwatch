@@ -1492,6 +1492,9 @@ function recordableComponents(comps: unknown, apiUrl: string): PageComponent[] {
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
+export const hasSufficientCoverage = (s: { coverageDays?: number }): boolean =>
+  s.coverageDays == null || s.coverageDays >= MIN_COVERAGE_DAYS
+
 /** #1006 — the uptime window AIWatch presents and scores on, computed by us from the provider's own
  *  records. #1110 — this constant governs the Atlassian + incident.io branch ONLY (the two reads at the
  *  `parseUptimeData` / `computeIncidentIoUptime` call sites): `parseBetterStackUptime`, the Instatus

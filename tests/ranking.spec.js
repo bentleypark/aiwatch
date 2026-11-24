@@ -19,12 +19,12 @@ test.describe('Ranking page', () => {
     await expect(page.locator('h2').filter({ hasText: /랭킹|Ranking/i })).toBeVisible()
   })
 
-  test('#802 — a recently-added (<30d coverage) service is excluded from the ranked table even with a top score', async ({ page }) => {
-    // fal has the HIGHER score (99 vs 95) but only 5 days of coverage → must NOT rank above (or at all
-    // alongside) the established Claude; it belongs under "Insufficient Data" until 30 days accrue.
+  test('#802/#2061 — a recently-added (<30d coverage) service, its number withheld, is not ranked and is listed under Recently Added', async ({ page }) => {
+    // fal has only 5 days of coverage → the Worker withholds its number, and it must not rank alongside the
+    // established Claude until 30 days accrue.
     const mock = { json: { services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.9, aiwatchScore: 95, scoreGrade: 'excellent', scoreConfidence: 'high', calendarDays: 30, incidents: [] },
-      { id: 'fal', category: 'api', name: 'fal.ai', provider: 'fal', status: 'operational', latency: 150, uptime30d: 99.5, aiwatchScore: 99, scoreGrade: 'excellent', scoreConfidence: 'high', coverageDays: 5, calendarDays: 30, incidents: [] },
+      { id: 'fal', category: 'api', name: 'fal.ai', provider: 'fal', status: 'operational', latency: 150, uptime30d: 99.5, aiwatchScore: null, scoreGrade: null, scoreConfidence: 'high', coverageDays: 5, calendarDays: 30, incidents: [] },
     ], lastUpdated: new Date().toISOString() } }
     await page.route('**/api/status**', (route) => route.fulfill(mock))
     await page.route('**/api/status/cached', (route) => route.fulfill(mock))

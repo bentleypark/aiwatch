@@ -694,6 +694,14 @@ describe('#1682 — a Score backed by no incident and no probe does not take a f
     expect(orderForFallback([peers[2], bare], 11).map(c => c.id)).toEqual(['windsurf', 'junie'])
   })
 
+  it('a candidate whose number the coverage gate withholds sinks and leaves the others\' order as it was (#2061)', () => {
+    const [a, b, m] = [agent('junie', 'Junie', 96), agent('copilot', 'GitHub Copilot', 85), agent('cursor', 'Cursor', 80, { scoreConfidence: 'medium' as const })]
+    const gated = agent('windsurf', 'Windsurf (Devin Desktop)', 0, { aiwatchScore: null })
+    const without = orderForFallback([a, b, m], 11).map(c => c.id)
+    expect(orderForFallback([gated, a, b, m], 11).map(c => c.id)).toEqual([...without, 'windsurf'])
+    expect(orderForFallback([gated], 11).map(c => c.id)).toEqual(['windsurf'])
+  })
+
   it('a score-withheld candidate with the same evidence is not moved ahead of other score-withheld ones', () => {
     const withheld = (id: string, over: Record<string, unknown>) => agent(id, id, 0, { aiwatchScore: null, scoreConfidence: 'low' as const, ...over })
     const [first, second] = [withheld('cursor', evidence(4, 'unsupported')), withheld('copilot', evidence(0, 'unsupported'))]

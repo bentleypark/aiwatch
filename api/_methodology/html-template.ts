@@ -421,6 +421,7 @@ ${clarityInitScript(nonce)}
   <p class="section-label">// 06</p>
   <h2 data-i18n="s4.title">AIWatch Score</h2>
   <p class="lead" data-i18n="s4.intro">AIWatch Score는 uptime, 인시던트 영향 일수, 복구 시간, (probe 대상 서비스의 경우) 응답성을 종합한 0~100점 신뢰도 지표입니다. 30일 데이터를 기준으로 합니다.</p>
+  <p data-i18n="s4.coverage"><strong>30일 미만 서비스:</strong> 모니터링에 추가한 지 30일이 되지 않은 서비스는 점수와 등급을 표시하지 않고 신뢰도 랭킹에서도 제외합니다. 관측 기간이 짧은 데이터만으로 순위가 매겨지는 일을 막기 위해서입니다. 30일이 지나면 이 기준으로는 더 이상 가려지지 않습니다. 그 사이에도 상태와 인시던트 기록은 그대로 볼 수 있습니다. 아래 Responsiveness의 7일 probe 기준과는 별개의 기준입니다.</p>
   <div class="formula" data-i18n="s4.formulaStr">AIWatch Score = Uptime + Incidents + Recovery + Responsiveness</div>
   <div class="score-grid">
     <div class="score-card sc-uptime"><div class="sc-max">40</div><div class="sc-label">Uptime</div></div>
@@ -607,6 +608,7 @@ const i18n = {
     's3.limits.xai': '프로브당 최근 60개 샘플 롤링 윈도우(수 분~수 시간, 재시작 누적 아님) 성공률만 노출 — 30일 수치와 비교 불가',
     's3.limits.deadsource': '공식 상태 페이지가 삭제됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
     's4.title': 'AIWatch Score',
+    's4.coverage': '<strong>30일 미만 서비스:</strong> 모니터링에 추가한 지 30일이 되지 않은 서비스는 점수와 등급을 표시하지 않고 신뢰도 랭킹에서도 제외합니다. 관측 기간이 짧은 데이터만으로 순위가 매겨지는 일을 막기 위해서입니다. 30일이 지나면 이 기준으로는 더 이상 가려지지 않습니다. 그 사이에도 상태와 인시던트 기록은 그대로 볼 수 있습니다. 아래 Responsiveness의 7일 probe 기준과는 별개의 기준입니다.',
     's4.intro': 'AIWatch Score는 uptime, 인시던트 영향 일수, 복구 시간, (probe 대상 서비스의 경우) 응답성을 종합한 0~100점 신뢰도 지표입니다. 30일 데이터를 기준으로 합니다.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',
     's4.input': '입력', 's4.points': '점수', 's4.below': '이하', 's4.days': '일', 's4.min': '분', 's4.hour': '시간',
@@ -703,6 +705,7 @@ const i18n = {
     's3.limits.xai': 'Exposes a per-probe success rate over a rolling 60-sample window (minutes to a few hours, not since restart) — not comparable to a 30-day figure',
     's3.limits.deadsource': 'Official status page deleted — no records to read (the API is checked by direct probe instead)',
     's4.title': 'AIWatch Score',
+    's4.coverage': '<strong>Services under 30 days:</strong> A service that has been monitored for fewer than 30 days shows no score or grade and is held out of the reliability ranking, so a short observation window cannot rank it. Once 30 days have passed, this rule no longer withholds it. Its status and incident history are shown as usual. This is separate from the 7-day probe-data rule for Responsiveness below.',
     's4.intro': 'AIWatch Score is a composite 0–100 reliability metric combining uptime, incident affected days, recovery time, and (for probed services) responsiveness. It is based on 30-day data.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',
     's4.input': 'Input', 's4.points': 'Points', 's4.below': 'or below', 's4.days': 'days', 's4.min': 'min', 's4.hour': 'h',

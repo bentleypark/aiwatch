@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, recordFeedDepthGaps, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditPages, uptimeScopeOf, type ServiceStatus } from './services'
+import { fetchAllServices, recordFeedDepthGaps, mistralFeedResolvedIds, fetchRosterAuditHtml, collectDetectablePages, CACHE_KEY, COMPONENT_ID_SERVICES, PARTIAL_COMPONENT_SERVICES, SERVICES, TRACKED_COMPONENT_IDS, rosterAuditPages, atlassianRosterAuditPages, uptimeScopeOf, hasSufficientCoverage, type ServiceStatus } from './services'
 import { statusVerdict, isAffectedStatus, isHealthyStatus, isUnreadableStatus, normalizeCachedServices } from './status-verdict'
 import { SUPPRESSIONS_KEY, normalizeSuppressionsCounted, classifyOperatorList, type OperatorListRead, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, isSuppressedByIdTitle, readSuppressionsFreshOrNull, readSuppressionsFreshResult, type SuppressionEntry } from './suppression'
 import { edgeFallbackLead } from './edge-fallback-text'
@@ -596,7 +596,20 @@ export function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary
 
 // The Score fields a fallback candidate carries; `orderForFallback` reads scoreBreakdown/scoreMetrics (#1682).
 export function withScore<T extends ServiceStatus>(svc: T, s: ReturnType<typeof scoreFor>) {
-  return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
+  return { ...svc, ...scoreFields(svc, s) }
+}
+
+// #2061 — the published Score fields. A service under the 30-day coverage gate (#802) carries no number
+// or grade, like a low-confidence one (#713); the breakdown and confidence stay.
+export function scoreFields(svc: { coverageDays?: number }, s: ReturnType<typeof scoreFor>) {
+  const withheld = !hasSufficientCoverage(svc)
+  return {
+    aiwatchScore: withheld ? null : s.score,
+    scoreGrade: withheld ? null : s.grade,
+    scoreConfidence: s.confidence,
+    scoreBreakdown: s.breakdown,
+    scoreMetrics: s.metrics,
+  }
 }
 
 const ROOTLY_SERVICE_IDS = new Set(SERVICES.filter((s) => s.rootlyFeed).map((s) => s.id))
@@ -3277,7 +3290,7 @@ export async function buildCachedStatusPayload(
   // Calculate scores for cached services (same as /api/status)
   const scoredCached = cached.services.map((svc) => {
     const s = scoreFor(svc, cachedProbeSummaries)
-    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
+    return { ...svc, ...scoreFields(svc, s), ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
   })
 
   // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
@@ -5876,11 +5889,8 @@ const workerExport = {
               // the outage's start and a null duration as "still running".
               ...(i.startUnknown ? { startUnknown: true } : {}),
             })),
-            aiwatchScore: scoreData.score,
-            scoreGrade: scoreData.grade,
-            scoreConfidence: scoreData.confidence,
-            scoreBreakdown: scoreData.breakdown,
-            scoreMetrics: scoreData.metrics,
+            ...scoreFields(svc, scoreData),
+            ...(svc.coverageDays != null ? { coverageDays: svc.coverageDays } : {}),
             ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}),
           },
           cachedAt: cached.cachedAt,
@@ -5891,6 +5901,7 @@ const workerExport = {
       return new Response(JSON.stringify({
         services: cached.services.map((svc) => {
           const scoreData = scoreFor(svc, v1ProbeSummaries)
+          const published = scoreFields(svc, scoreData)
           return {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
             group: serviceGroupOf(svc.id), // #1068 — fine category (llm/voice/…); coarse `category` unchanged
@@ -5907,7 +5918,8 @@ const workerExport = {
             // #713 — scoreConfidence disambiguates a null aiwatchScore (low-confidence: no official
             // uptime + no probe → score withheld) from a missing/errored value, matching the
             // single-service response below.
-            aiwatchScore: scoreData.score, scoreGrade: scoreData.grade, scoreConfidence: scoreData.confidence,
+            aiwatchScore: published.aiwatchScore, scoreGrade: published.scoreGrade, scoreConfidence: published.scoreConfidence,
+            ...(svc.coverageDays != null ? { coverageDays: svc.coverageDays } : {}),
           }
         }),
         cachedAt: cached.cachedAt,
@@ -6443,7 +6455,7 @@ const workerExport = {
         const detectedAt = detectionMap.get(svc.id) ?? null
         // #883 — expose the parent whose probe feeds this service's inherited Responsiveness, so the
         // detail UI shows a labeled "via <parent>" latency instead of a contradictory "Not provided".
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}), ...(detectedAt ? { detectedAt } : {}) }
+        return { ...svc, ...scoreFields(svc, s), ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}), ...(detectedAt ? { detectedAt } : {}) }
       })
 
       // Read AI analysis from KV — per-incident keys, active incidents + recently resolved

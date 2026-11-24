@@ -19,7 +19,7 @@ import { compareGroupedRows, dominantGroupStatus, incidentDurationText, incident
 import { SCORE_TEXT_CLASS, feedUrlOf, NO_SERVICES } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMinShown } from '../utils/recovery'
 import { groupRangeText, groupBadgeText, hidesEntryStatus } from '../utils/groupLabels'
-import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
+import { isUnreliableUptime, noOfficialUptime, showsScoreCard, showsScoreBreakdown } from '../utils/serviceReliability'
 import { latencyCardState, latencyCardSub, latestProbeData } from '../utils/latencyCard'
 import { measuredRtt } from '../../worker/src/probe'
 import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
@@ -1031,98 +1031,106 @@ export default function ServiceDetails({ serviceId }) {
       </div>
 
       {/* ── AIWatch Score Breakdown ── */}
-      {service.aiwatchScore != null && !incidentsBlanked && (
+      {showsScoreCard(service) && !incidentsBlanked && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className={`flex items-center justify-between gap-3${showsScoreBreakdown(service) ? ' border-b border-[var(--border)]' : ''}`} style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center flex-wrap gap-1.5 min-w-0">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
               {t('score.label')}
-              <span className="text-[var(--text2)] font-normal">— 30{t('settings.period.suffix')}</span>
-              {/* #802 — a recently-added service (<30d coverage) shows its Score here but is held out of
-                  the Reliability Ranking until a full window accrues; note that explicitly. */}
+              {showsScoreBreakdown(service) && (
+                <span className="text-[var(--text2)] font-normal">— 30{t('settings.period.suffix')}</span>
+              )}
+              {/* #802 — a recently-added service (<30d coverage) is held out of the Reliability Ranking until a
+                  full window accrues; note that explicitly. */}
               {service.coverageDays != null && service.coverageDays < 30 && (
                 <span className="text-[var(--amber)] font-normal normal-case tracking-normal">· {t('score.coverage.insufficient')}</span>
               )}
             </div>
-            <span className={`mono text-[18px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
-              {service.aiwatchScore}
-            </span>
+            {showsScoreBreakdown(service) && (
+              <span className={`mono text-[18px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
+                {service.aiwatchScore}
+              </span>
+            )}
           </div>
-          <div style={{ padding: '16px' }}>
-            <div className="flex flex-col gap-3">
-              {service.scoreBreakdown?.uptime != null ? (
-                <div className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
-                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 40) * 100}%` }} />
-                  </div>
-                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/40</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
-                  <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.unavailable')}</span>
-                </div>
-              )}
-              {[
-                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 25 },
-                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 15 },
-              ].map(({ label, value, max }) => (
-                <div key={label} className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
-                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${((value ?? 0) / max) * 100}%` }} />
-                  </div>
-                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value != null ? value : '—'}/{max}</span>
-                </div>
-              ))}
-              {service.scoreBreakdown?.responsivenessStatus === 'available' && service.scoreBreakdown?.responsiveness != null && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
-                    <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                      <div className="bg-[var(--purple)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.responsiveness / 20) * 100}%` }} />
-                    </div>
-                    <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.responsiveness}/20</span>
-                  </div>
-                  {/* #1002 — speed vs stability are two distinct axes (fast-but-jittery vs slow-but-steady)
-                      that `responsiveness` sums and hides; show the split, parent bar stays authoritative. */}
-                  {[
-                    { label: t('score.responsiveness.speed'), value: service.scoreBreakdown?.speed },
-                    { label: t('score.responsiveness.stability'), value: service.scoreBreakdown?.stability },
-                  ].map(({ label, value }) => value != null && (
-                    // Same label/bar/value column widths as the parent row above, so the bar TRACK
-                    // stays aligned with every other row's — only the label text carries the "child
-                    // of Resp." signal (└ prefix), never a row-level offset that breaks the grid.
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="w-16 shrink-0 mono text-[9px] text-[var(--text2)]">└ {label}</span>
-                      <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
-                        <div className="bg-[var(--purple)] rounded-full" style={{ height: '4px', width: `${(value / 10) * 100}%`, opacity: 0.7 }} />
+          <div style={{ padding: showsScoreBreakdown(service) ? '16px' : '0 16px 12px' }}>
+            {showsScoreBreakdown(service) && (
+              <>
+                <div className="flex flex-col gap-3">
+                  {service.scoreBreakdown?.uptime != null ? (
+                    <div className="flex items-center gap-3">
+                      <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                      <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                        <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 40) * 100}%` }} />
                       </div>
-                      <span className="w-10 shrink-0 text-right mono text-[9px] text-[var(--text2)]">{value}/10</span>
+                      <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/40</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                      <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.unavailable')}</span>
+                    </div>
+                  )}
+                  {[
+                    { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 25 },
+                    { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 15 },
+                  ].map(({ label, value, max }) => (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
+                      <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                        <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${((value ?? 0) / max) * 100}%` }} />
+                      </div>
+                      <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value != null ? value : '—'}/{max}</span>
                     </div>
                   ))}
+                  {service.scoreBreakdown?.responsivenessStatus === 'available' && service.scoreBreakdown?.responsiveness != null && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
+                        <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                          <div className="bg-[var(--purple)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.responsiveness / 20) * 100}%` }} />
+                        </div>
+                        <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.responsiveness}/20</span>
+                      </div>
+                      {/* #1002 — speed vs stability are two distinct axes (fast-but-jittery vs slow-but-steady)
+                          that `responsiveness` sums and hides; show the split, parent bar stays authoritative. */}
+                      {[
+                        { label: t('score.responsiveness.speed'), value: service.scoreBreakdown?.speed },
+                        { label: t('score.responsiveness.stability'), value: service.scoreBreakdown?.stability },
+                      ].map(({ label, value }) => value != null && (
+                        // Same label/bar/value column widths as the parent row above, so the bar TRACK
+                        // stays aligned with every other row's — only the label text carries the "child
+                        // of Resp." signal (└ prefix), never a row-level offset that breaks the grid.
+                        <div key={label} className="flex items-center gap-3">
+                          <span className="w-16 shrink-0 mono text-[9px] text-[var(--text2)]">└ {label}</span>
+                          <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
+                            <div className="bg-[var(--purple)] rounded-full" style={{ height: '4px', width: `${(value / 10) * 100}%`, opacity: 0.7 }} />
+                          </div>
+                          <span className="w-10 shrink-0 text-right mono text-[9px] text-[var(--text2)]">{value}/10</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* 'insufficient' has actionable info ("data accumulating <7d"); 'unavailable' is a transient
+                      KV race window of seconds — surfacing it as user-visible text would be alarmist with no recourse,
+                      so we collapse it to the 'unsupported' (hidden row) branch. */}
+                  {service.scoreBreakdown?.responsivenessStatus === 'insufficient' && (
+                    <div className="flex items-center gap-3">
+                      <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
+                      <span className="mono text-[10px] text-[var(--text2)]">{t('score.responsiveness.insufficient')}</span>
+                    </div>
+                  )}
                 </div>
-              )}
-              {/* 'insufficient' has actionable info ("data accumulating <7d"); 'unavailable' is a transient
-                  KV race window of seconds — surfacing it as user-visible text would be alarmist with no recourse,
-                  so we collapse it to the 'unsupported' (hidden row) branch. */}
-              {service.scoreBreakdown?.responsivenessStatus === 'insufficient' && (
-                <div className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
-                  <span className="mono text-[10px] text-[var(--text2)]">{t('score.responsiveness.insufficient')}</span>
-                </div>
-              )}
-            </div>
-            {service.scoreConfidence !== 'high' && (
-              <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>
-                * {t('score.no_uptime')}
-              </div>
+                {service.scoreConfidence !== 'high' && (
+                  <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>
+                    * {t('score.no_uptime')}
+                  </div>
+                )}
+              </>
             )}
             {/* #681 — contextual link to the public methodology page (#673). Same-tab internal nav
                 with a "→" affordance — NOT the ↗+new-tab used for the EXTERNAL Official Status link
                 above (methodology is our own page, so a new tab would be the wrong convention). */}
-            <div style={{ marginTop: '12px' }}>
+            <div style={{ marginTop: showsScoreBreakdown(service) ? '12px' : 0 }}>
               <a
                 href="/methodology#score"
                 onClick={() => trackEvent('click_methodology', { location: 'service_details', source: 'score_breakdown' })}

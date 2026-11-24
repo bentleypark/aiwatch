@@ -67,15 +67,22 @@ export const splitByConfidence = (scored) => ({
  *  rankable once its probe warms, so the ranking page treats it as "recently added", not "no data". */
 export const isProbeWarming = (s) => s.scoreBreakdown?.responsivenessStatus === 'insufficient'
 
+/** #2061 — the Worker computed a real Score for this service (high or medium confidence). Its number can
+ *  still be withheld by the coverage gate, so this reads the confidence, never `aiwatchScore`. */
+export const isScorable = (s) => s.scoreConfidence === 'high' || s.scoreConfidence === 'medium'
+
+export const showsScoreCard = (s) => s.aiwatchScore != null || (isScorable(s) && !hasSufficientCoverage(s))
+export const showsScoreBreakdown = (s) => s.aiwatchScore != null
+
 /** #802/#870 — a NOT-YET-RANKED service is "Recently Added" (building data, `ranks in Nd`) — as opposed
  *  to "Insufficient Data" (genuinely un-measurable) — when it has a live feed + a <30d window AND either
- *  (a) it is ALREADY scorable (non-null score, non-low confidence) and only the 30d coverage gate holds
+ *  (a) it is ALREADY scorable (high or medium confidence) and only the 30d coverage gate holds
  *  it out, OR (b) its only disqualifier is a WARMING probe (a new probe target that will reach `available`
  *  at ~7d), so it WILL rank — it must not be lumped with Azure OpenAI (unsupported, no probe) or a stale
  *  feed. */
 export const isRecentlyAdded = (s) =>
   !s.incidentSourceStale && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS
-  && ((s.aiwatchScore != null && s.scoreConfidence !== 'low') || isProbeWarming(s))
+  && (isScorable(s) || isProbeWarming(s))
 
 /** #1186 — rank one confidence tier's array independently. Sorted by score descending; `rank`/`isTied`
  *  are derived from the array (competition ranking: ties share a rank, the next distinct score skips
