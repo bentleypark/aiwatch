@@ -705,6 +705,13 @@ export const MOCK_SERVICES = [
     history3m: [],
     incidents: [],
   },
+  {
+    id: 'kimicode', category: 'agent', name: 'Kimi Code', provider: 'Moonshot AI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist([]),
+    history3m: [],
+    incidents: [],
+  },
 ]
 
 // Mock AI analysis. API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple

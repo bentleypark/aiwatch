@@ -120,7 +120,8 @@ export function servicesByStatusSource(): Record<string, string[]> {
 const KIMI_API_COMPONENTS = ['Open API']
 const KIMI_APP_COMPONENTS = ['Website', 'Sign In / Sign Up', 'File uploads', 'Search', 'API Service', 'Model', 'Vision Model', 'Thinking Model', 'Text Model', 'Research Model', 'K2 Model']
 const KIMI_APP_COMPONENT_IDS = ['sttxgsd2bps7', 'ckrtmmv96r2z', 'x3z9ydzr6ywk', 'smbb3z35s0jl', 'rf64wcbxt3r2', 'x0zsqgy57b75', '8rkd3yj051gl', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', 'wmn9wzv84k1v', 'z2zfp65lvb2z']
-const KIMI_TITLE_MAP: Record<string, string> = { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly', '开放平台 API 服务异常': 'Open Platform API service disruption', 'kimi fs服务异常': 'Kimi file service disruption', '二维码登录异常': 'QR code login failure', 'API 服务可用性低': 'API service availability low', 'google登录异常': 'Google login failure' }
+const KIMICODE_COMPONENT_IDS = ['t1ffjsrj7j9d', 'qhrvl9ccfvp6', '1l34rxbvx0gt', 'bs3h7057mc6g', 'qrqn4ss6d252', 'dyw7p8553q3z']
+const KIMI_TITLE_MAP: Record<string, string> = { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly', '开放平台 API 服务异常': 'Open Platform API service disruption', 'kimi fs服务异常': 'Kimi file service disruption', '二维码登录异常': 'QR code login failure', 'API 服务可用性低': 'API service availability low', 'google登录异常': 'Google login failure', 'Kimi Code K3 TTFT 响应延迟升高': 'Kimi Code K3: elevated time to first token', 'Kimi Code K2.8 Preview TTFT 响应延迟升高': 'Kimi Code K2.8 Preview: elevated time to first token', 'Kimi Code K2.7 Code Highspeed TTFT 响应延迟严重升高': 'Kimi Code K2.7 Code Highspeed: severely elevated time to first token', 'Kimi Code K3 OTPS 响应生成速度下降': 'Kimi Code K3: reduced output speed', 'Kimi Code K3 OTPS 响应生成速度严重下降': 'Kimi Code K3: severely reduced output speed', 'Kimi Code K3 模型服务出现错误': 'Kimi Code K3: model service errors', 'Kimi Code K3 模型服务持续波动': 'Kimi Code K3: model service unstable', 'Kimi Code K3 请求处理严重异常': 'Kimi Code K3: severe request-processing errors', 'Kimi Code K3.1 Pro 请求处理严重异常': 'Kimi Code K3.1 Pro: severe request-processing errors', 'Kimi Code K3.1 Pro Highspeed 请求处理严重异常': 'Kimi Code K3.1 Pro Highspeed: severe request-processing errors', 'Kimi Code K2.8 Preview 请求处理严重异常': 'Kimi Code K2.8 Preview: severe request-processing errors' }
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -576,7 +577,7 @@ export const SERVICES: ServiceConfig[] = [
   // under "Models". `incidentComponentsKeepUntagged`: an incident that names no component lands here
   // rather than on neither card.
   // rosterAuditExclude: Open API + Open Platform Portal (the `kimi` card) and the page's three group
-  // headers. The Kimi Code members are left to age into the audit — their add-or-decline is #1690.
+  // headers. The Kimi Code members are `kimicode`'s (#1690); the page is audited once for both cards.
   { id: 'kimiapp', name: 'Kimi App', provider: 'Moonshot AI', category: 'app', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: 'sttxgsd2bps7', statusComponentIds: KIMI_APP_COMPONENT_IDS, displayComponentIds: KIMI_APP_COMPONENT_IDS, componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, incidentComponents: KIMI_APP_COMPONENTS, incidentComponentsKeepUntagged: true, autoMonitorTitles: [/^agentic\s*模型错误报警$/i, /^搜索请求出现大量报错$/, /^kimi\s*fs服务异常$/i, /^api\s*服务可用性低$/i], autoMonitorCriticalHoldable: true, titleMap: KIMI_TITLE_MAP, rosterAuditExclude: ['8psr5dfdld0s', 'pjrph68g94yr', '01l1n50g13g6', '87jpctq5cp71', 'cyrtlddz0q8c'], addedAt: '2026-10-19' },
   // #1837 — Grok Bot (x.ai/bot), a component on Cursor's status page (`status.cursor.com` → 301 → status.x.ai).
   // Same page as `cursor`, which scopes Grok Bot-only incidents off its card (#1814). No uptime source and no
@@ -645,6 +646,11 @@ export const SERVICES: ServiceConfig[] = [
     // out of scope" the first time it ran (verified live 2026-09-27: all nine already clear 30 days).
     rosterAuditExclude: ['01KT3TKKVHP9JNBCP6D63MZC9Z', '01KT3TKKVHB8J2H181X7CXWG2N', '01KT3TKKVH6PHX9PRSVTKWW1J1', '01KT3TKKVHBXFS0ZY0JP5N8JJY', '01KX3EN5354CVBD36GANTX2BC4', '01KXKAD3T0PWTN9V9Y8KZX7PQ4', '01KXKAD3T062J5MV4MJS9AF5WW', '01KXFRGMR34YYVMFEWHW02SMK2', '01KXKAD3T0VVB85VS1E08F9ZEH'],
   },
+  // #1690 — Kimi Code: the "Kimi Code" group on status.moonshot.cn, the coding plan's own API (api.kimi.com/coding/v1), a
+  // separate product from the `kimi` API card and `kimiapp`. Badge + uptime = worst-of the group's members; the group's own timeline
+  // averages them, which dilutes one member's outage to a sixth. A member the page adds ages into the roster audit shared with
+  // `kimiapp`. Incidents are scoped by the title prefix, which every incident tagged on the group carries.
+  { id: 'kimicode', name: 'Kimi Code', provider: 'Moonshot AI', category: 'agent', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: KIMICODE_COMPONENT_IDS[0], statusComponentIds: KIMICODE_COMPONENT_IDS, incidentKeywords: ['kimi code'], autoMonitorTitles: [/^kimi\s*code\s+.+?\s+ttft\s*响应延迟(严重)?升高$/i, /^kimi\s*code\s+.+?\s+otps\s*响应生成速度(严重)?下降$/i, /^kimi\s*code\s+.+?\s+模型服务(出现错误|持续波动)$/i, /^kimi\s*code\s+.+?\s+请求处理严重异常$/i], titleMap: KIMI_TITLE_MAP, addedAt: '2026-11-20' },
 ]
 
 /**
@@ -1316,12 +1322,41 @@ export function rosterAuditPages(services: ServiceConfig[] = SERVICES): RosterAu
  * #1518 — Atlassian services whose BADGE/uptime scope is a multi-id list (`statusComponentIds.length >
  * 1`), the roster-audit equivalent of `rosterAuditPages` for the incident.io branch. Excludes any
  * service that ALSO sets `incidentIoComponentId` via this function's own `!s.incidentIoComponentId`
- * filter — those go through the incident.io roster (`rosterAuditPages`) instead. Returns configs, not a
- * grouped page type: the cron's seen-key is per `statusUrl`, so two multi-id services sharing one page
- * would collide on it — pinned in this function's test.
+ * filter — those go through the incident.io roster (`rosterAuditPages`) instead. Returns configs;
+ * `atlassianRosterAuditPages` groups them by `statusUrl`, because the cron's seen-key is per page.
  */
 export function atlassianRosterAuditServices(services: ServiceConfig[] = SERVICES): ServiceConfig[] {
   return services.filter((s) => Array.isArray(s.statusComponentIds) && s.statusComponentIds.length > 1 && !s.incidentIoComponentId)
+}
+
+export interface AtlassianRosterAuditPage {
+  statusUrl: string
+  componentsUrl: string
+  serviceNames: string[]
+  scopeIds: string[]
+  exclude: string[]
+  fixedScope: boolean
+}
+
+/** #1690 — one audit per status page: the audited services that share a `statusUrl` are judged against the UNION of their
+ *  scopes and exclusions, so a component one card tracks is never reported as out of scope because its sibling does not. */
+export function atlassianRosterAuditPages(services: ServiceConfig[] = SERVICES): AtlassianRosterAuditPage[] {
+  const byPage = new Map<string, ServiceConfig[]>()
+  for (const s of atlassianRosterAuditServices(services)) byPage.set(s.statusUrl, [...(byPage.get(s.statusUrl) ?? []), s])
+  const pages: AtlassianRosterAuditPage[] = []
+  for (const [statusUrl, configs] of byPage) {
+    const componentsUrl = configs.map((c) => c.componentsUrl ?? c.apiUrl).find((u): u is string => !!u)
+    if (!componentsUrl) continue
+    pages.push({
+      statusUrl,
+      componentsUrl,
+      serviceNames: configs.map((c) => c.name),
+      scopeIds: [...new Set(configs.flatMap((c) => uptimeScopeOf(c)))],
+      exclude: [...new Set(configs.flatMap((c) => c.rosterAuditExclude ?? []))],
+      fixedScope: configs.every((c) => c.rosterAuditFixedScope === true),
+    })
+  }
+  return pages
 }
 
 /**

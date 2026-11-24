@@ -15,5 +15,5 @@ export const DEVICE_CHECK_READABLE: Readonly<Record<string, { header?: string }>
 }
 
 export const DEVICE_CHECK_UNREADABLE: readonly string[] = [
-  'replicate', 'bfl', 'deepgram', 'pinecone', 'runway', 'luma', 'helicone', 'cursor', 'characterai',
+  'replicate', 'bfl', 'deepgram', 'pinecone', 'runway', 'luma', 'helicone', 'cursor', 'characterai', 'kimicode',
 ]

@@ -15,7 +15,7 @@ export type ServiceGroup =
 /** group → member service ids. Same shape + order as SERVICE_CATEGORIES for a clean cross-check. */
 export const GROUP_MEMBERS: Record<ServiceGroup, readonly string[]> = {
   llm: ['claude', 'openai', 'gemini', 'xai', 'mistral', 'bedrock', 'azureopenai', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'deepseek', 'kimi', 'openrouter'],
-  agents: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'],
+  agents: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie', 'kimicode'],
   voice: ['elevenlabs', 'assemblyai', 'deepgram', 'fishaudio', 'speechmatics'],
   inference: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'jina', 'pinecone', 'turbopuffer', 'twelvelabs'],
   observability: ['langsmith', 'helicone', 'langfuse'],

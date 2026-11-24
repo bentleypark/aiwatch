@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { atlassianRosterAuditServices, uptimeScopeOf, SERVICES } from '../services'
+import { atlassianRosterAuditServices, atlassianRosterAuditPages, uptimeScopeOf, SERVICES } from '../services'
 import { rosterAgedInFindings } from '../roster-audit'
 import { atlassianRosterEntries } from '../parsers/statuspage'
 import type { ServiceConfig } from '../types'
@@ -7,7 +7,7 @@ import type { ServiceConfig } from '../types'
 describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalent of rosterAuditPages)', () => {
   it('matches exactly the real multi-id Atlassian services, none of the incident.io ones', () => {
     const ids = atlassianRosterAuditServices().map((s) => s.id).sort()
-    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'deepgram', 'jina', 'kimiapp', 'pinecone', 'runway', 'speechmatics', 'twelvelabs', 'windsurf'])
+    expect(ids).toEqual(['bfl', 'claudeai', 'copilot', 'cursor', 'deepgram', 'jina', 'kimiapp', 'kimicode', 'pinecone', 'runway', 'speechmatics', 'twelvelabs', 'windsurf'])
   })
 
   it('excludes a service with a single-id statusComponentIds list', () => {
@@ -37,9 +37,38 @@ describe('atlassianRosterAuditServices (#1518 — the Atlassian-branch equivalen
     expect(fixed).toEqual(['bfl'])
   })
 
-  it('no two of them share a statusUrl — the cron keys its seen-set on statusUrl alone', () => {
-    const urls = atlassianRosterAuditServices().map((s) => s.statusUrl)
-    expect(new Set(urls).size).toBe(urls.length)
+  it('#1690 the cron keys its seen-set on statusUrl, so the pages are one per statusUrl; only status.moonshot.cn carries two services', () => {
+    const pages = atlassianRosterAuditPages()
+    expect(new Set(pages.map((p) => p.statusUrl)).size).toBe(pages.length)
+    expect(pages.filter((p) => p.serviceNames.length > 1).map((p) => [p.statusUrl, p.serviceNames])).toEqual([['https://status.moonshot.cn', ['Kimi App', 'Kimi Code']]])
+  })
+
+  it('#1690 a page is judged against the union of its services\' scopes and exclusions, and is fixed-scope only if every service is', () => {
+    const mk = (id: string, ids: string[], extra: Partial<ServiceConfig> = {}): ServiceConfig =>
+      ({ id, name: id.toUpperCase(), provider: 'X', category: 'api', statusUrl: 'https://x.example', apiUrl: 'https://x.example/api/v2/summary.json', statusComponentId: ids[0], statusComponentIds: ids, ...extra })
+    const [page, ...rest] = atlassianRosterAuditPages([
+      mk('a', ['1', '2'], { rosterAuditExclude: ['g1'], rosterAuditFixedScope: true }),
+      mk('b', ['2', '3'], { rosterAuditExclude: ['g2'], rosterAuditFixedScope: true }),
+    ])
+    expect(rest).toEqual([])
+    expect(page.serviceNames).toEqual(['A', 'B'])
+    expect(page.scopeIds.sort()).toEqual(['1', '2', '3'])
+    expect(page.exclude.sort()).toEqual(['g1', 'g2'])
+    expect(page.fixedScope).toBe(true)
+    const [mixed] = atlassianRosterAuditPages([mk('a', ['1', '2'], { rosterAuditFixedScope: true }), mk('b', ['3', '4'])])
+    expect(mixed.fixedScope).toBe(false)
+  })
+
+  it('#1690 on status.moonshot.cn the merged audit reports a NEW Kimi Code member and none of the six tracked ones', () => {
+    const page = atlassianRosterAuditPages().find((p) => p.statusUrl === 'https://status.moonshot.cn')!
+    const kimicode = SERVICES.find((s) => s.id === 'kimicode')!
+    const old = '2025-01-01T00:00:00Z'
+    const entries = [
+      ...kimicode.statusComponentIds!.map((id) => ({ id, dataAvailableSince: old, groupId: 'cyrtlddz0q8c' })),
+      { id: 'cyrtlddz0q8c', dataAvailableSince: old, groupId: null },
+      { id: 'NEW_KIMICODE_MEMBER', dataAvailableSince: old, groupId: 'cyrtlddz0q8c' },
+    ]
+    expect(rosterAgedInFindings(entries, page.scopeIds, page.exclude, page.fixedScope, Date.parse('2026-12-01T00:00:00Z'))).toEqual(['NEW_KIMICODE_MEMBER'])
   })
 
   it('#1821 — on status.moonshot.cn a new member of either group still reports, though kimiapp excludes the group headers', () => {

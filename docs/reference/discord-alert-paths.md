@@ -122,10 +122,10 @@ directions").
 
 `atlassianRosterAuditServices` (services.ts) is the `rosterAuditPages` counterpart for this branch —
 every service with `statusComponentIds.length > 1` and no `incidentIoComponentId` (the two branches
-never compute uptime for the same service). No two of them share a page — pinned in `atlassian-roster-audit-services.test.ts`,
-because the seen-key is per `statusUrl` — so no cross-service union is needed. The reader (`atlassianRosterEntries`, statuspage.ts) reads each
+never compute uptime for the same service). `atlassianRosterAuditPages` groups them per `statusUrl` (the seen-key's scope) and audits each page against the union of its services'
+scopes and exclusions. The reader (`atlassianRosterEntries`, statuspage.ts) reads each
 component's `created_at` directly off the SAME `componentsUrl`/`apiUrl` payload already fetched for
-names — ONE fetch per service, no second request. It does NOT read `/uptime_showcase`'s day-by-day
+names — ONE fetch per page, no second request. It does NOT read `/uptime_showcase`'s day-by-day
 timeline: that endpoint pads every requested component to a FIXED 90-day window regardless of real age
 (verified live: a component created 2026-08-17 still returned a chart starting 2026-06-30, with the
 pre-creation days carrying `outages: {}` — a defined-but-empty object indistinguishable from a

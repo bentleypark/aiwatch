@@ -99,6 +99,7 @@
 | GitHub Copilot | GitHub |
 | Windsurf (Devin Desktop) | Cognition |
 | Junie | JetBrains |
+| Kimi Code | Moonshot AI |
 
 ### 음성
 
@@ -357,6 +358,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `grok` | Grok | `fishaudio` | Fish Audio |
 | `jina` | Jina AI | `kimiapp` | Kimi App |
 | `grokbot` | Grok Bot | `speechmatics` | Speechmatics |
+| `kimicode` | Kimi Code | | |
 
 ## Claude Code Statusline 통합
 
