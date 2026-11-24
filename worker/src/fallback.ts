@@ -424,6 +424,9 @@ type OrderCandidate = {
 const isUncorroborated = (c: OrderCandidate): boolean =>
   c.scoreConfidence === 'high' && c.scoreMetrics?.incidents30d === 0 && c.scoreBreakdown?.responsivenessStatus === 'unsupported'
 
+const isWithheld = (c: OrderCandidate): boolean =>
+  c.aiwatchScore === null && (c.scoreConfidence === 'high' || c.scoreConfidence === 'medium')
+
 export function orderForFallback<T extends OrderCandidate>(
   candidates: T[],
   sourceTier: number,
@@ -443,7 +446,7 @@ export function orderForFallback<T extends OrderCandidate>(
     for (const c of group) {
       // '__none__' covers a caller that doesn't attach scoreConfidence at all (e.g. the RSS feed's
       // degraded path — see orderForFallback's doc comment).
-      const key = isUncorroborated(c) ? 'uncorroborated' : (c.scoreConfidence ?? '__none__')
+      const key = isUncorroborated(c) ? 'uncorroborated' : isWithheld(c) ? 'withheld' : (c.scoreConfidence ?? '__none__')
       const bucket = byConfidence.get(key)
       if (bucket) bucket.push(c)
       else byConfidence.set(key, [c])
@@ -475,7 +478,7 @@ export function orderForFallback<T extends OrderCandidate>(
     // buildRanking hit this exact shape on the Ranking page; a hardcoded 2-key list here missed it.
     for (const [key, bucket] of byConfidence) {
       if (key === 'high' || key === 'medium' || key === 'uncorroborated') continue
-      if (key !== 'low' && key !== '__none__') {
+      if (key !== 'low' && key !== '__none__' && key !== 'withheld') {
         console.warn(`[fallback] unrecognized scoreConfidence "${key}" on ${bucket.map((c) => c.id).join(', ')} — sinking below high/medium instead of dropping`)
       }
       result.push(...bucket)

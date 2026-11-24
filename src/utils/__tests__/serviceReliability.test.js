@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage, isProbeWarming, isRecentlyAdded, splitByConfidence, rankTier, buildRanking } from '../serviceReliability'
+import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage, isScorable, showsScoreCard, showsScoreBreakdown, isProbeWarming, isRecentlyAdded, splitByConfidence, rankTier, buildRanking } from '../serviceReliability'
 
 // #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
 // `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
@@ -89,6 +89,26 @@ describe('isProbeWarming / isRecentlyAdded (#870)', () => {
 
   it('an already-scorable <30d service is Recently Added (the #802 coverage-only case)', () => {
     expect(isRecentlyAdded(scorableNew)).toBe(true)
+  })
+
+  it('the detail page keeps its Score card for a scorable service whose number is withheld, and for no other', () => {
+    expect(showsScoreCard({ ...scorableNew, coverageDays: null })).toBe(true)        // number present, established
+    expect(showsScoreCard({ ...scorableNew, aiwatchScore: null })).toBe(true)        // withheld by the coverage gate
+    expect(showsScoreCard({ ...scorableNew, aiwatchScore: null, coverageDays: 30 })).toBe(false)
+    expect(showsScoreCard({ ...scorableNew, aiwatchScore: null, coverageDays: null })).toBe(false)
+    expect(showsScoreCard({ ...warmingNew })).toBe(false)                            // low confidence: no card, as before
+    expect(showsScoreCard({ ...unmeasurable })).toBe(false)
+  })
+
+  it('the component bars, which sum to the Score, render only while the number is published', () => {
+    expect(showsScoreBreakdown(scorableNew)).toBe(true)
+    expect(showsScoreBreakdown({ ...scorableNew, aiwatchScore: null })).toBe(false)
+    expect(showsScoreBreakdown({ ...scorableNew, aiwatchScore: 0 })).toBe(true)
+  })
+
+  it('stays Recently Added when the Worker withholds its number (#2061)', () => {
+    expect(isRecentlyAdded({ ...scorableNew, aiwatchScore: null, scoreGrade: null })).toBe(true)
+    expect(isRecentlyAdded({ ...scorableNew, aiwatchScore: null, scoreConfidence: 'medium' })).toBe(true)
   })
 
   it('a STALE new service is NOT Recently Added even if probe-warming (stale feed dominates)', () => {
