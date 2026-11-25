@@ -15,7 +15,7 @@ describe('parseUptimeData embed-format handling (#868)', () => {
     const html = `<script>\n  window.uptimeData = ${OBJ};\n  var uptimeData = window.uptimeData;\n</script>`
     const r = parseUptimeData(html, 'comp1')
     expect(r.uptimePercent).toBe(99.85)
-    expect(r.dailyImpact['2026-07-02']).toBe('major') // minor/partial outage → orange
+    expect(r.dailyImpact['2026-07-02']).toBe('minor') // 259.2 weighted seconds is under the major cut
   })
 
   it('NEW format still works when the alias line appears BEFORE the data assignment', () => {

@@ -181,22 +181,69 @@ describe('parseUptimeData', () => {
     expect(result.uptimePercent).toBeLessThan(100)
   })
 
-  it('sets dailyImpact correctly — critical when m > p', () => {
+  it('sets dailyImpact from the day\'s weighted outage seconds, not from which bucket dominates (#2060)', () => {
     const html = makeHtml({
       comp1: {
         days: [
-          { date: '2026-03-01', outages: { p: 100, m: 200 } },
-          { date: '2026-03-02', outages: { p: 300, m: 100 } },
+          // The first three days are the Kimi Code group figures from #2060's evidence table.
+          { date: '2026-03-01', outages: { p: 50, m: 0 } },    // 15s weighted
+          { date: '2026-03-02', outages: { p: 349, m: 0 } },   // 104.7s
+          { date: '2026-03-03', outages: { p: 3610, m: 0 } },  // 1083s
+          { date: '2026-03-04', outages: { p: 0, m: 3000 } },  // 3000s — exactly the critical cut
+          { date: '2026-03-05', outages: { p: 100, m: 200 } }, // m > p, but only 230s
         ],
       },
     })
     const result = parseUptimeData(html, 'comp1')
-    expect(result.dailyImpact['2026-03-01']).toBe('critical') // m > p
-    expect(result.dailyImpact['2026-03-02']).toBe('major')    // p >= m
+    expect(result.dailyImpact['2026-03-01']).toBe('minor')
+    expect(result.dailyImpact['2026-03-02']).toBe('minor')
+    expect(result.dailyImpact['2026-03-03']).toBe('major')
+    expect(result.dailyImpact['2026-03-04']).toBe('critical')
+    expect(result.dailyImpact['2026-03-05']).toBe('minor') // the old `m > p` rule painted this critical
     // Lock the combined-impact uptime% formula: MAJOR_WEIGHT(1.0) × m + MINOR_WEIGHT(0.3) × p
-    // Day 1: 1.0×200 + 0.3×100 = 230s ; Day 2: 1.0×100 + 0.3×300 = 190s ; total = 420s over 2 days
-    const expected = Math.floor((1 - 420 / (2 * 86400)) * 10000) / 100
+    // Day 1: 15 ; Day 2: 104.7 ; Day 3: 1083 ; Day 4: 3000 ; Day 5: 1.0×200 + 0.3×100 = 230 ; total = 4432.7s over 5 days
+    const expected = Math.floor((1 - 4432.7 / (5 * 86400)) * 10000) / 100
     expect(result.uptimePercent).toBe(expected)
+  })
+
+  it('a day with only partial-outage seconds stops at major, however long (#2060)', () => {
+    const html = makeHtml({
+      comp1: {
+        days: [
+          { date: '2026-03-01', outages: { p: 15301, m: 0 } }, // 4590s weighted: over the critical cut
+          { date: '2026-03-02', outages: { p: 86400, m: 0 } }, // the whole day
+          { date: '2026-03-03', outages: { p: 86400, m: 1 } }, // one major-outage second lifts the cap
+          { date: '2026-03-04', outages: { p: 10000, m: 0 } }, // exactly 3000s weighted, still partial only
+        ],
+      },
+    })
+    const result = parseUptimeData(html, 'comp1')
+    expect(result.dailyImpact['2026-03-01']).toBe('major')
+    expect(result.dailyImpact['2026-03-02']).toBe('major')
+    expect(result.dailyImpact['2026-03-03']).toBe('critical')
+    expect(result.dailyImpact['2026-03-04']).toBe('major')
+  })
+
+  it('paints exactly the days with any outage, whatever the level (#2060)', () => {
+    const days = [
+      { p: 0, m: 0 }, { p: 1, m: 0 }, { p: 0, m: 1 }, { p: 1, m: 1 },
+      { p: 86400, m: 0 }, { p: 0, m: 86400 }, { p: 599, m: 0 },
+    ].map((outages, i) => ({ date: `2026-03-0${i + 1}`, outages }))
+    const result = parseUptimeData(makeHtml({ comp1: { days } }), 'comp1')
+    expect(Object.keys(result.dailyImpact)).toEqual(
+      days.filter((d) => d.outages.p > 0 || d.outages.m > 0).map((d) => d.date),
+    )
+  })
+
+  it('a multi-component scope takes the worst level over its members on each day (#2060)', () => {
+    const html = makeHtml({
+      compA: { days: [{ date: '2026-03-01', outages: { p: 50, m: 0 } }, { date: '2026-03-02', outages: { p: 0, m: 0 } }, { date: '2026-03-03', outages: { p: 0, m: 3000 } }] },
+      compB: { days: [{ date: '2026-03-01', outages: { p: 15301, m: 0 } }, { date: '2026-03-02', outages: { p: 349, m: 0 } }, { date: '2026-03-03', outages: { p: 15301, m: 0 } }] },
+    })
+    const result = parseUptimeData(html, ['compA', 'compB'])
+    expect(result.dailyImpact['2026-03-01']).toBe('major') // compB's 4590s partial-only governs, not compA's 15s
+    expect(result.dailyImpact['2026-03-02']).toBe('minor')
+    expect(result.dailyImpact['2026-03-03']).toBe('critical') // compA's major outage, not compB's capped partial
   })
 
   it('returns empty when component not found', () => {

@@ -2,7 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
-import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
+import { MAJOR_WEIGHT, MINOR_WEIGHT, classifyWeightedDay } from './impact-weights'
 
 export interface StatuspageResponse {
   status: { indicator: string; description: string }
@@ -450,10 +450,8 @@ function computeUptimeDataSingle(data: UptimeTimelines | null, componentId: stri
     }
     for (const day of comp.days) {
       if (!day.date || !day.outages) continue
-      const m = day.outages.m ?? 0
-      const p = day.outages.p ?? 0
-      if (m > 0 && m > p) result.dailyImpact[day.date] = 'critical'  // major outage dominant → red
-      else if (p > 0 || m > 0) result.dailyImpact[day.date] = 'major'  // partial outage dominant → orange
+      const level = classifyWeightedDay(weighted(day), (day.outages.m ?? 0) > 0)
+      if (level) result.dailyImpact[day.date] = level
     }
 
     // Compute uptime%: (1 - weightedOutage / windowSec) × 100

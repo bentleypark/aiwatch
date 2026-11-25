@@ -3,8 +3,22 @@
 // (estimate from incident durations) so both sources produce comparable uptime%.
 // Reference: Statuspage's `(major × 1.0 + partial × 0.3) / windowSec` formula. (#259)
 
+import type { DailyImpactLevel } from '../types'
+
 export const MAJOR_WEIGHT = 1.0
 export const MINOR_WEIGHT = 0.3
+
+/** #2060 — a calendar day's level from its weighted outage seconds (`MAJOR_WEIGHT·m + MINOR_WEIGHT·p`);
+ *  a day with no major-outage seconds stops at `major`. */
+export const DAY_MAJOR_THRESHOLD_SEC = 600
+export const DAY_CRITICAL_THRESHOLD_SEC = 3000
+
+export function classifyWeightedDay(weightedOutageSec: number, hasMajorOutage: boolean): DailyImpactLevel | null {
+  if (!(weightedOutageSec > 0)) return null
+  if (hasMajorOutage && weightedOutageSec >= DAY_CRITICAL_THRESHOLD_SEC) return 'critical'
+  if (weightedOutageSec >= DAY_MAJOR_THRESHOLD_SEC) return 'major'
+  return 'minor'
+}
 
 /** Maps incident.io impact severity strings to weights.
  *  null = informational (skipped); missing key = unknown level (skipped + logged by caller). */
