@@ -4,9 +4,9 @@
 // IMPACT-ALIGNED and frontend-internal (NOT the wire `service.status`) — #663 renamed them from the
 // old degraded_perf/degraded/down so the key name matches the incident impact and the severity order
 // is self-evident, decoupling the calendar from the 3-state badge that shares the `status.*` i18n:
-//   'critical'    — red:    critical impact (major/full outage)
-//   'major'       — orange: major impact (partial outage)
-//   'minor'       — yellow: minor / null / unknown impact (degraded)
+//   'critical'    — red
+//   'major'       — orange
+//   'minor'       — yellow: also null / unknown impact
 //   'operational' — green:  no incidents
 // User-facing labels (#674: Critical / Major / Minor / Operational — the Statuspage impact axis) via the
 // `cal.status.*` i18n keys. Index 0 = oldest, last index = today.
