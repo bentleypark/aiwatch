@@ -76,6 +76,9 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
 2. **Fill the hand-authored sections** — everything the generator leaves as a placeholder/AUTO-DRAFT:
    - **Summary** (EN bullets: Most reliable / Riskiest / High incident count / Watch out) **AND the KO
      `<details>` mirror** — keep both in lockstep.
+     **Watch out** carries a figure in this month's tables that a reader would misread, and why: 2026-06
+     through 2026-09 each used it that way (an advisory counted as downtime, one event published against
+     three surfaces, reconstructed incident rows, a change in how downtime is counted).
    - **Recommendations** table (per use-case). **Category coverage is data-driven per month
      (aiwatch-reports#62)** — do NOT ship the frozen 5-row template blindly:
      - **Always-present buyer-intent rows** (any category can win): Production-critical, Low latency /
@@ -171,6 +174,10 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      (e.g. Gemini's count stayed 3→3 while its total 351h→35h collapsed onto one 242h outage not recurring —
      *shorter incidents*, not "closing incidents faster") is not a systematic improvement; report what the
      count and longest actually show.
+     A figure written beside a Score change reads as its reason, so it must be what moved the Score: read
+     both months' `monthlyScoreBreakdown` for the service and name the component that changed most. A true
+     number on a component that barely moved is a wrong reason — the 2026-10 draft gave OpenRouter's
+     downtime for a fall that was mostly Incidents (aiwatch-reports#194).
      (2) *A STANDING methodological caveat* — Anthropic's per-model incident counts, no-official-uptime
      (Bedrock/Azure), probe-RTT-≠-inference-latency — lives in the **About / methodology** section and has already
      appeared in prior months; do NOT re-explain it in full in the narrative every cycle (a regular reader has
@@ -273,11 +280,13 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
    it flat** — lead with the **month-over-month change** ("Together 133 → 85") or pick a fresh lens, using
    the MoM delta the block/auto-draft already computed. This is the exact miss the feature exists to catch.
+   The **SCORE CHANGE CHECK** block beside it lists each Score change by component, largest first; a reason
+   you give for a Score change names the component at the head of its line (aiwatch-reports#194).
 
-4. **Delete EVERY AUTO-DRAFT / RECURRENCE CHECK fence** before publishing. Any surviving
-   `<!-- BEGIN AUTO-DRAFT … -->` / `<!-- … RECURRENCE CHECK … -->` in a `published: true` report **hard-fails
-   the pre-publish CI lint (aiwatch-reports#55)** (`scripts/lint-recurrence.js`). Search the file for `AUTO-DRAFT` and
-   `RECURRENCE CHECK` and confirm zero remain.
+4. **Delete EVERY AUTO-DRAFT / RECURRENCE CHECK / SCORE CHANGE CHECK fence** before publishing. Any surviving
+   `<!-- BEGIN AUTO-DRAFT … -->` / `<!-- … RECURRENCE CHECK … -->` / `<!-- … SCORE CHANGE CHECK … -->` in a
+   `published: true` report **hard-fails the pre-publish CI lint (aiwatch-reports#55)** (`scripts/lint-recurrence.js`).
+   Search the file for `AUTO-DRAFT`, `RECURRENCE CHECK` and `SCORE CHANGE CHECK` and confirm zero remain.
 
 4.5. **Check for a story told in full twice — after all four narrative sections are filled
    (aiwatch-reports#122).** Step 2's cross-section rule has no mechanical check; this prints its input:
@@ -318,8 +327,9 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      every KO `<details>` mirror:
      each number, rank, grade, duration and percentage against the archive and the report's own tables,
      showing the computation for a mismatch; each superlative or absolute ("only", "highest", "all",
-     "none", "first") against every peer in scope; and any claim about individual services inferred from
-     a net tally.
+     "none", "first") against every peer in scope; any claim about individual services inferred from
+     a net tally; and each figure written beside a Score change against both months'
+     `monthlyScoreBreakdown`, so that it sits on the component that moved most.
    - An uptime figure in prose is `officialUptime` — what the 30-Day Uptime table renders
      (`officialUptimeFor`) — never the archive's daily-counter `uptime` (aiwatch#951).
    - Loop fix → re-review until a round has 0 Critical/Important, as in `ship-issue` steps 5–6. Re-run it
