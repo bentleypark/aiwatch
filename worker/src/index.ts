@@ -16,7 +16,7 @@ import { markWithdrawalsAnnounced, markWithdrawalsClosedByResolved, readWithdraw
 import type { AlertCandidate } from './alerts'
 import { fallbackEmbedSection } from './fallback'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildMaintenanceAlerts, sinkDeferrableAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, markerReadPlan, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, buildRedditEngageTargets, appendRedditSection, buildBlueskyEngageTargets, appendBlueskySection, buildHnEngageTargets, appendHnSection, buildEngageReplyDrafts, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordEnrichCounts, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, copyPriorServiceAnalysis, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordEnrichCounts, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, detectPartialResolves, formatPartialResolveAlert, diffPageComponents, partitionFirstSeen, placeNewComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm, parseSnapshotWindow, HISTORY_RETENTION_DAYS, fetchWithTimeout, settleWithin, omitsTimeSeries, isResolvedWithoutEnd } from './utils'
 import { parseIncidentIoAllComponentUptimes } from './parsers/incident-io'
@@ -1541,15 +1541,12 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
-    // The new-incident AI section: an existing (non-empty) KV analysis first, else one inline call.
-    // When neither yields one, the alert ships without it and is edited later (#1152).
     // The operator embed AND the per-user relay share this single analysisSection.
     let analysisSection = ''
     let enrichTarget: { svcId: string; incId: string } | null = null
     if (alert.key.startsWith('alerted:new:')) {
       const incId = alert.key.replace('alerted:new:', '')
-      // #545: scope AI analysis to the service this alert actually represents (alert.svcIds[0]) — for a
-      // late joiner that's the newly-affected service (e.g. ChatGPT), not the incident's first service.
+      // #545: the service this alert actually represents (alert.svcIds[0]).
       const primaryId = alert.svcIds?.[0]
       const svc = (primaryId && scored.find(s => s.id === primaryId))
         || scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
@@ -1564,6 +1561,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
             if (p && typeof p.summary === 'string' && p.summary.length > 0) existing = p
           } catch { existing = null }
         }
+        if (!existing && alert.priorSvcIds?.length) existing = await copyPriorServiceAnalysis(env.STATUS_CACHE, svc.id, inc.id, alert.priorSvcIds)
         // #1697 — this service's past recovery times, shown under the estimate.
         const baseline = (await readRecoveryBaselines(env.STATUS_CACHE))[svc.id]
         if (existing) {
@@ -1784,6 +1782,7 @@ async function cronAlertCheck(env: Env, scheduledTimeMs: number = Date.now()): P
     // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
     if (alert.impactText) parts.push(alert.impactText)
+    if (alert.joinText) parts.push(alert.joinText)
     const aiAt = parts.join('\n').length
     if (analysisSection) parts.push(analysisSection)
     if (recoverySection) parts.push(recoverySection) // #827 F4 status-edge recovery + #846 alerted:res: prediction

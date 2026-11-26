@@ -365,6 +365,8 @@ export interface AlertCandidate {
    *  the alert was built. A joiner's alert carries only itself in `svcIds`, so the group-vs-single
    *  link decisions count these too (`familyMembersForAlert`). */
   priorSvcIds?: string[]
+  /** #2072 — new-incident alerts for a joiner only: names the services already alerted for this incident. */
+  joinText?: string
   /** #1021 — set on a non-reliability ADVISORY alert (usage-limits/quota/…, reframed ℹ️/blue).
    *  Downstream consumers read it through the shared `isNonOutageAlert` predicate. The dedup `key`
    *  is unchanged. */
@@ -542,6 +544,11 @@ export function mergedAlertName(names: string[], providers: string[]): string {
   return new Set(providers).size === 1 ? `${providers[0]} (${names.join(', ')})` : names.join(', ')
 }
 
+/** #2072 — the joiner alert's line naming the services this incident was already affecting. */
+export function joinedIncidentText(priorNames: string[], joinerName: string): string {
+  return `🔗 Already affecting ${sanitize(priorNames.join(', '))} — ${sanitize(joinerName)} was added to this incident later.`
+}
+
 /**
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
@@ -691,18 +698,21 @@ export function buildIncidentAlerts(
       ? `📅 The provider dates this incident ${formatDuration(new Date(startedMs), new Date(now))} before this alert — its duration will be measured from then, not from now.`
       : undefined
     const dot = severityEmoji(firstSvc, inc, 'active')
+    const prior = [...(alertedNewMap.get(incId) ?? [])]
+    const joinText = prior.length > 0 ? joinedIncidentText(prior.map((id) => services.find((s) => s.id === id)?.name ?? id), displayName) : undefined
     alerts.push({
       key: `alerted:new:${incId}`,
-      title: `${dot} ${displayName} — ${isAdvisory ? 'Advisory' : 'New Incident'}`,
+      title: `${dot} ${displayName} — ${isAdvisory ? 'Advisory' : joinText ? 'Now Affected' : 'New Incident'}`,
       description: sanitize(inc.title),
       ...(impact ? { impactText: `${severityEmoji(firstSvc, inc, 'active')} **${impact}**` } : {}),
       fallbackText,
       regionText,
       ...(ageText ? { ageText } : {}),
+      ...(joinText ? { joinText } : {}),
       color: NEW_INCIDENT_COLOR[dot] ?? 0xED4245,
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
-      ...(alertedNewMap.get(incId)?.size ? { priorSvcIds: [...alertedNewMap.get(incId)!] } : {}),
+      ...(prior.length > 0 ? { priorSvcIds: prior } : {}),
       ...(isAdvisory ? { advisory: true } : {}),
     })
   }
