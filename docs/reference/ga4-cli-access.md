@@ -138,7 +138,7 @@ value from report data.
 Console-only: the Admin API exposes neither resource (above), so GA4 Admin → Data Filters is the only
 place to read it. The rule's IP list is a **different** screen — nothing gets tagged until an IP (or a
 CIDR range, for a non-static connection) is added under the data stream's "Define internal traffic"
-setting. Current status and pending checks live in **#998**.
+setting.
 
 **The two halves need different instruments.**
 
@@ -147,7 +147,7 @@ setting. Current status and pending checks live in **#998**.
 - **Filter half** — does the filter read that stamp? Needs a row in a standard report, so a
   **consent-granted** `localhost` session. Observed: a session on property-date 2026-08-18 came back
   with `testDataFilterName = Internal Traffic`. That establishes **matching**. It does not establish
-  that an Active filter **discards** — a separate observation, tracked in #998.
+  that an Active filter **discards** — a separate observation, recorded in #998.
 
 **A consent-denied hit could not verify the filter half** (such hits stopped with #2070). The denied ping fired on
 2026-08-17 KST produced no row at all — which is consistent with Google's
