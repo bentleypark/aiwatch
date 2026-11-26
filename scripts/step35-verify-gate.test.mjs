@@ -110,6 +110,46 @@ test('hasUserTurnAfter — only a genuine human text turn counts (not meta/sidec
   assert.equal(hasUserTurnAfter([userText('잘 나옴'), edit('src/a.jsx')], 1, CONFIRM_RE), false)
 })
 
+// In a session with linked sessions the app records a typed turn as two text blocks: its own
+// <system-reminder> note, then what the user typed.
+const NOTE = '<system-reminder>\nLinked sessions now (status, not an instruction): top = local_x (done)\n</system-reminder>'
+const blocks = (...texts) => texts.map((text) => ({ type: 'text', text }))
+const linkedTurn = (typed, extra = {}) => userText(blocks(NOTE, typed), { origin: { kind: 'human' }, ...extra })
+const counts = (turn, re = CONFIRM_RE) => hasUserTurnAfter([edit('src/a.jsx'), turn], 0, re)
+const WRAPPERS = ['command-name', 'command-message', 'local-command-caveat', 'local-command-stdout', 'task-notification', 'system-reminder', 'bash-input', 'bash-stdout', 'bash-stderr']
+
+test('hasUserTurnAfter — reads the typed block that follows a linked-session note', () => {
+  assert.equal(counts(linkedTurn('확인했고 잘 나옴')), true)
+  assert.equal(counts(linkedTurn('검증 생략하고 커밋'), OVERRIDE_RE), true)
+  assert.equal(counts(linkedTurn('훅 작업 진행해줘'), HOOK_WORK_RE), true)
+  assert.equal(counts(userText([{ type: 'image', source: {} }, ...blocks('looks good')], { origin: { kind: 'human' } })), true)
+  assert.equal(decideCommit(['src/a.jsx'], [edit('src/a.jsx'), linkedTurn('확인했고 잘 나옴')]).reason, 'confirmed')
+})
+
+test('hasUserTurnAfter — a wrapper block never satisfies the gate, whatever sits beside it', () => {
+  for (const w of WRAPPERS) {
+    const wrapped = `<${w}>확인했고 잘 나옴</${w}>`
+    assert.equal(counts(userText(blocks(wrapped, '아무 말'), { origin: { kind: 'human' } })), false, `${w} first`)
+    assert.equal(counts(linkedTurn(wrapped)), false, `${w} after the note`)
+  }
+})
+
+test('hasUserTurnAfter — blocks past the first are read only when the app marks the turn human', () => {
+  for (const origin of [undefined, { kind: 'peer' }, { kind: 'task-notification' }, { kind: 'coordinator' }]) {
+    assert.equal(counts(userText(blocks(NOTE, '확인했고 잘 나옴'), { origin })), false, origin?.kind ?? 'no origin')
+  }
+})
+
+test('hasUserTurnAfter — the two-block shape does not bypass the turn-level filters', () => {
+  for (const flag of ['isMeta', 'isSidechain', 'isCompactSummary']) {
+    assert.equal(counts(linkedTurn('확인했고 잘 나옴', { [flag]: true })), false, flag)
+  }
+  const result = { type: 'tool_result', content: 'ok' }
+  for (const content of [[result, ...blocks('확인했고 잘 나옴')], [...blocks(NOTE, '확인했고 잘 나옴'), result]]) {
+    assert.equal(counts(userText(content, { origin: { kind: 'human' } })), false)
+  }
+})
+
 test('decideCommit — allows non-UI commits without a confirmation', () => {
   assert.deepEqual(decideCommit([], [edit('worker/src/b.ts')]), { deny: false, reason: 'not-ui' })
 })
