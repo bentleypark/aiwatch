@@ -1,6 +1,6 @@
 // #2024 — Microsoft Clarity session replay, for visitors who granted analytics consent only.
-// Unlike gtag.js on the Edge pages (#998), Clarity is never loaded before consent: its no-consent
-// mode still records, one id per page view (Clarity Consent API v2 docs).
+// Clarity is never loaded before consent: its no-consent mode still records, one id per page view
+// (Clarity Consent API v2 docs).
 
 // Same value as CLARITY_PROJECT_ID in api/_shared/clarity.ts (pinned by api/_shared/__tests__/clarity.test.ts).
 export const CLARITY_ID = 'zfdscev1gz'

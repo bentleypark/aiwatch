@@ -62,8 +62,7 @@ describe('renderMethodologyPage', () => {
     const tags = (withNonce.match(/<script(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>/g) ?? [])
     expect(tags.length).toBeGreaterThanOrEqual(2) // consent init + the i18n/interactivity script (+ cookie banner)
     for (const tag of tags) expect(tag).toContain('nonce="NONCE123"')
-    // gtag.js loader (src) also nonce-stamped for GA4 propagation; JSON-LD stays clean
-    expect(withNonce).toMatch(/<script async nonce="NONCE123" src="https:\/\/www\.googletagmanager\.com/)
+    expect(withNonce).not.toMatch(/<script[^>]*\ssrc="https:\/\/www\.googletagmanager\.com/) // #2070
     expect(withNonce).toMatch(/<script type="application\/ld\+json">/) // unchanged, no nonce needed
     // no stray nonce when omitted
     expect(renderMethodologyPage()).not.toContain('nonce="')

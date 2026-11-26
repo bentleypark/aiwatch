@@ -1,10 +1,9 @@
 import { test, expect } from './fixtures.js'
+import { GA_HIT_RE } from './ga-hosts.js'
 
-// #352: GDPR consent gate for Edge SSR + Jekyll surfaces.
-//
-// CLAUDE.md acceptance criteria: "with consent denied/absent, no requests to
-// google-analytics.com/g/collect from these routes; with consent granted, GA4 fires
-// normally". This spec asserts both halves with a Playwright network listener.
+// #352 / #2070: consent gate for the Edge SSR surfaces. With consent denied or absent, no request
+// for gtag.js and no collect request; with consent granted, GA4 fires normally. This spec asserts
+// both halves with a Playwright network listener.
 //
 // GA4 issues collect requests to either domain depending on region/CDN routing:
 //   - https://www.google-analytics.com/g/collect
@@ -17,6 +16,15 @@ function recordCollect(page) {
   const hits = []
   page.on('request', (req) => {
     if (COLLECT_RE.test(req.url())) hits.push(req.url())
+  })
+  return hits
+}
+
+function recordGoogle(page) {
+  const hits = []
+  page.on('request', (req) => {
+    const url = req.url()
+    if (new URL(url).hostname === 'www.googletagmanager.com' || GA_HIT_RE.test(url)) hits.push(url)
   })
   return hits
 }
@@ -36,38 +44,34 @@ const SURFACES = [
 
 for (const surface of SURFACES) {
   test.describe(`Consent gate (#352) — ${surface.name}`, () => {
-    test('no _ga cookie set when consent is absent (Consent Mode v2 default-denied)', async ({ page }) => {
-      const hits = recordCollect(page)
-      // No prior localStorage seed → consent key is absent on first visit.
-      await page.goto(surface.path, { waitUntil: 'networkidle' })
-      await page.waitForTimeout(1500) // catch any deferred GA pings
+    for (const [label, seed] of [['absent', null], ['explicitly denied', 'denied']]) {
+      test(`nothing is requested from Google when consent is ${label}`, async ({ page }) => {
+        const hits = recordGoogle(page)
+        if (seed) {
+          await page.addInitScript((value) => {
+            try { localStorage.setItem('aiwatch-cookie-consent', value) } catch {}
+          }, seed)
+        }
+        await page.goto(surface.path, { waitUntil: 'networkidle' })
+        await page.waitForTimeout(1500) // catch any deferred GA request
 
-      // Acceptance criterion: no analytics cookies are written to the user's device.
-      // Privacy Policy documents that cookieless pings still flow under Consent Mode v2
-      // — those carry a per-request `cid` that is NOT persisted in any cookie.
-      expect(await getGaCookies(page)).toHaveLength(0)
-
-      // If a collect ping fires, it MUST signal denied consent (gcs=G1xx where 1=denied).
-      // gcs=G111 / G110 / G100 all indicate analytics_storage=denied.
-      for (const url of hits) {
-        const gcs = (url.match(/[?&]gcs=([^&]+)/) || [])[1]
-        expect(gcs, `g/collect must carry gcs=denied marker, got ${url}`).toMatch(/^G1/)
-      }
-    })
-
-    test('no _ga cookie set when localStorage explicitly denies consent', async ({ page }) => {
-      const hits = recordCollect(page)
-      await page.addInitScript(() => {
-        try { localStorage.setItem('aiwatch-cookie-consent', 'denied') } catch {}
+        expect(hits).toEqual([])
+        expect(await getGaCookies(page)).toHaveLength(0)
       })
-      await page.goto(surface.path, { waitUntil: 'networkidle' })
-      await page.waitForTimeout(1500)
+    }
 
-      expect(await getGaCookies(page)).toHaveLength(0)
-      for (const url of hits) {
-        const gcs = (url.match(/[?&]gcs=([^&]+)/) || [])[1]
-        expect(gcs, `g/collect must carry gcs=denied marker, got ${url}`).toMatch(/^G1/)
-      }
+    test('Accept All starts GA4 on the same page view, without a reload', async ({ page }) => {
+      const google = recordGoogle(page)
+      const collect = recordCollect(page)
+      await page.goto(surface.path, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(1000)
+      expect(google).toEqual([])
+      await page.evaluate(() => { window.__sameDocument = true })
+
+      await page.locator('[data-aiwatch-cb="accept"]').click()
+
+      await expect.poll(() => collect.length, { timeout: 10_000 }).toBeGreaterThan(0)
+      expect(await page.evaluate(() => window.__sameDocument)).toBe(true)
     })
 
     test('g/collect fires AND _ga cookie is set when consent is granted', async ({ page }) => {
@@ -145,49 +149,22 @@ test.describe('Consent banner DOM (#352)', () => {
     await expect(page.locator('#aiwatch-cookie-banner')).toBeHidden()
   })
 
-  test('Accept-failure gating: when setItem throws, banner stays + no consent upgrade fires', async ({ page }) => {
-    // Simulate Safari private mode / quota-exhausted: localStorage.setItem throws on the
-    // consent key. Capture every gtag call so we can assert no "consent","update","granted"
-    // ever fires under this failure mode.
+  test('Accept-failure gating: when setItem throws, banner stays and GA4 does not start', async ({ page }) => {
+    // Simulate Safari private mode / quota-exhausted: localStorage.setItem throws on the consent key.
+    const google = recordGoogle(page)
     await page.addInitScript(() => {
       const origSet = Storage.prototype.setItem
       Storage.prototype.setItem = function (key, value) {
         if (key === 'aiwatch-cookie-consent') throw new Error('simulated quota')
         return origSet.call(this, key, value)
       }
-      window.__gtagCalls = []
-      const realPush = Array.prototype.push
-      // Hook the dataLayer queue instead of window.gtag directly — gtag() pushes into
-      // dataLayer, so monkey-patching the queue captures all calls regardless of when
-      // gtag.js arrives.
-      Object.defineProperty(window, 'dataLayer', {
-        configurable: true,
-        get() { return this._dataLayer || (this._dataLayer = []) },
-        set(v) { this._dataLayer = v },
-      })
-      const wrappedPush = function (...args) {
-        for (const a of args) window.__gtagCalls.push(a)
-        return realPush.apply(this, args)
-      }
-      // Wait for dataLayer init then attach the spy.
-      const interval = setInterval(() => {
-        if (window.dataLayer && !window.dataLayer.__hooked) {
-          window.dataLayer.push = wrappedPush
-          window.dataLayer.__hooked = true
-          clearInterval(interval)
-        }
-      }, 5)
     })
     await page.goto('/is-claude-api-down', { waitUntil: 'domcontentloaded' })
     await page.locator('[data-aiwatch-cb="accept"]').click()
+    await page.waitForTimeout(1500)
     // Banner must remain visible — user re-prompted next interaction since choice didn't persist.
     await expect(page.locator('#aiwatch-cookie-banner')).toBeVisible()
-    // Consent state stays denied — no upgrade-to-granted ever queued.
-    const grantedCalls = await page.evaluate(() =>
-      (window.__gtagCalls || []).filter(
-        (c) => Array.isArray(c) && c[0] === 'consent' && c[1] === 'update' && c[2]?.analytics_storage === 'granted'
-      ).length
-    )
-    expect(grantedCalls, 'no gtag(consent, update, granted) call must fire when persistence failed').toBe(0)
+    expect(google).toEqual([])
+    expect(await page.evaluate(() => typeof window.gtag)).toBe('undefined')
   })
 })

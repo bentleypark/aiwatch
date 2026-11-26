@@ -1304,6 +1304,48 @@ describe('renderShareButtons — copy text keeps AIWatch branding across statuse
   }
 })
 
+// #2070 — `gtag` does not exist until analytics consent, so a bare call in a success path would throw
+// into that handler's catch: a "Copy this:" prompt after a copy that worked, a Kakao error after a send.
+describe('share buttons work without gtag (#2070)', () => {
+  const shareScript = async () => {
+    const { extractInlineScripts } = await import('../../_shared/csp-hash')
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo({ displayName: 'Claude API' }), [])
+    const body = extractInlineScripts(html).find((s) => s.includes('function copyLink('))!
+    return new Function(`${body}\n;return { copyLink: copyLink, shareKakao: shareKakao }`)() as {
+      copyLink: (btn: HTMLButtonElement) => void
+      shareKakao: () => void
+    }
+  }
+  beforeEach(() => { vi.stubGlobal('gtag', undefined) })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it('copy link shows Copied!, restores the button and never falls back to a prompt', async () => {
+    const { copyLink } = await shareScript()
+    const prompt = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('navigator', { clipboard: { writeText: () => Promise.resolve() } })
+    vi.useFakeTimers()
+    const btn = document.createElement('button')
+    btn.dataset.url = 'https://ai-watch.dev/is-claude-down'
+    copyLink(btn)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(btn.innerHTML).toContain('Copied!')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(btn.classList.contains('copied')).toBe(false)
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  it('Kakao share sends without logging a failure', async () => {
+    const { shareKakao } = await shareScript()
+    const sendDefault = vi.fn()
+    vi.stubGlobal('Kakao', { isInitialized: () => true, Share: { sendDefault } })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    shareKakao()
+    expect(sendDefault).toHaveBeenCalledOnce()
+    expect(error).not.toHaveBeenCalled()
+  })
+})
+
 describe('RSS feed surfacing on /is-*-down (#430)', () => {
   it('emits a per-service RSS autodiscovery <link> in <head>', () => {
     const html = renderPage('claude', mkService(), mkSeo({ displayName: 'Claude' }), [])

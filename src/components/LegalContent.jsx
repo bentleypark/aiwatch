@@ -20,7 +20,7 @@ export function PrivacyContent() {
         · Button click events (Refresh, filter changes, etc.)<br />
         · Device type, browser, and operating system<br />
         · Country/region (with IP anonymization)<br /><br />
-        We do not collect personally identifiable information such as names or email addresses. Without analytics consent, GA4 operates in cookieless mode under Google Consent Mode v2 — only aggregate, anonymized pings flow, with no client identifier stored.<br /><br />
+        We do not collect personally identifiable information such as names or email addresses. Without analytics consent, AIWatch does not load Google Analytics, and your browser sends nothing to it unless you choose Accept All.<br /><br />
         <strong>Session replay (only with analytics consent)</strong> — if you choose Accept All, AIWatch also loads Microsoft Clarity, which records how pages are used (page views, scrolling, clicks and mouse movement) so we can see where the dashboard and "Is X down?" pages are hard to use. Clarity hides what you type into input boxes and dropdowns, and AIWatch additionally hides the Discord webhook field. Clarity stores the _clck and _clsk cookies on ai-watch.dev, and Microsoft sets its own cookies on clarity.ms (such as CLID, MUID and SM). Microsoft describes MUID as used "for advertising, site analytics, and other operational purposes"; AIWatch blocks Clarity's connection to Bing (c.bing.com) and does not use these cookies for advertising. AIWatch cannot remove cookies set on clarity.ms; you can delete them in your browser's settings. Clarity is never loaded before or without your consent.<br /><br />
         To detect slow loading, anonymous performance timings are recorded with the visitor's country and the Cloudflare data center that served the request. No IP address is stored. Each batch of timings carries a random identifier generated when the page loads and is recorded with them, so slow loads can be grouped by visit. The identifier is kept only in the page's memory, never written to your device, and a reload creates a new one.</p>
       <h3 style={headingStyle}>2. Cookies and Local Storage</h3>
@@ -75,7 +75,7 @@ export function PrivacyContent() {
         · 버튼 클릭 이벤트 (새로고침, 필터 변경 등)<br />
         · 기기 종류, 브라우저, 운영체제<br />
         · 국가/지역 정보 (IP 익명화 적용)<br /><br />
-        개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다. 분석 동의를 하지 않은 상태에서는 GA4가 Google Consent Mode v2의 cookieless 모드로 동작하며, 클라이언트 식별자가 저장되지 않은 익명 집계 ping만 전송됩니다.<br /><br />
+        개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다. 분석 동의를 하지 않은 상태에서는 AIWatch가 Google Analytics를 불러오지 않으며, "모두 동의"를 선택하지 않으면 브라우저에서 Google Analytics로 아무것도 전송하지 않습니다.<br /><br />
         <strong>세션 리플레이 (분석 동의 시에만)</strong> — "모두 동의"를 선택하면 AIWatch는 Microsoft Clarity도 불러옵니다. Clarity는 페이지 이용 방식(페이지 이동, 스크롤, 클릭, 마우스 움직임)을 기록해, 대시보드와 "Is X down?" 페이지에서 어디가 쓰기 어려운지 파악하는 데 쓰입니다. 입력란과 드롭다운에 입력한 내용은 Clarity가 가리며, Discord Webhook 입력란은 AIWatch가 추가로 가립니다. Clarity는 ai-watch.dev에 _clck, _clsk 쿠키를 저장하고, Microsoft는 clarity.ms 도메인에 자체 쿠키(CLID, MUID, SM 등)를 저장합니다. Microsoft는 MUID를 "광고, 사이트 분석 및 기타 운영 목적"에 쓴다고 밝히고 있습니다. AIWatch는 Clarity의 Bing(c.bing.com) 연결을 차단하며, 이 쿠키를 광고에 사용하지 않습니다. clarity.ms에 저장된 쿠키는 AIWatch가 삭제할 수 없으며, 브라우저 설정에서 직접 삭제할 수 있습니다. 동의 전이나 동의 없이 Clarity를 불러오는 일은 없습니다.<br /><br />
         로딩 지연을 감지하기 위해 익명 성능 측정값을 접속 국가 및 요청을 처리한 Cloudflare 데이터센터와 함께 기록합니다. IP 주소는 저장하지 않습니다. 측정값 묶음마다 페이지를 불러올 때 생성한 무작위 식별자가 함께 기록되어, 느린 로딩을 방문 단위로 묶어 볼 수 있습니다. 이 식별자는 페이지 메모리에만 있고 기기에 저장되지 않으며 새로고침하면 새로 만들어집니다.</p>
       <h3 style={headingStyle}>2. 쿠키 및 로컬 저장소</h3>

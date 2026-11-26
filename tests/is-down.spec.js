@@ -97,7 +97,10 @@ test.describe('Is X Down? SSR pages', () => {
         await expect(p.locator('.cta .cta-alt a')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
       })
 
-      test(`has GA4 tag`, async ({ page: p }) => {
+      test(`has GA4 tag once analytics consent is stored`, async ({ page: p }) => {
+        await p.addInitScript(() => {
+          try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch {}
+        })
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         const ga = p.locator('script[src*="googletagmanager.com/gtag/js"]')
         await expect(ga).toHaveAttribute('src', /G-D4ZWVHQ7JK/)
