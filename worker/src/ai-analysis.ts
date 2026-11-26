@@ -346,6 +346,24 @@ export async function putAnalysis(
   }
 }
 
+/** #2072 — a joiner's alert carries the analysis a prior service of the same incident already has,
+ *  copied the way `refreshOrReanalyze` copies a sibling. Null when no prior service has one. */
+export async function copyPriorServiceAnalysis(
+  kv: KVLike,
+  svcId: string,
+  incId: string,
+  priorSvcIds: readonly string[],
+): Promise<AIAnalysisResult | null> {
+  for (const prior of priorSvcIds) {
+    if (prior === svcId) continue
+    const sibling = parseAnalysis(await kv.get(analysisKey(prior, incId)).catch(() => null))
+    if (!sibling || typeof sibling.summary !== 'string' || sibling.summary.length === 0) continue
+    const written = await putAnalysis(kv, svcId, incId, sibling, sibling, 3600, null)
+    return written.ok ? written.pinned : null
+  }
+  return null
+}
+
 /** Parse a raw `ai:analysis:*` KV value, returning null on absent/corrupt/non-object rather than
  *  throwing — the write paths need the prior analysis only to carry its first estimate forward, and
  *  a corrupt prior must not abort the write. (An array parses as an `object` in JS — reject it too.) */

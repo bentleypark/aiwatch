@@ -16,6 +16,10 @@ tags: [worker, alerts, discord]
 
 Neither path alerts on a **reference incident** (#1669 — a console/dashboard component such as Claude Console): `buildIncidentAlerts` raises a New alert only from `incidents`, and those live in `referenceIncidents`. One already announced while it was counted still gets its Resolved alert (#1698). Whether a reference incident should ever alert is an open decision, not an omission. See [status-determination.md](status-determination.md#a-component-that-is-not-a-service--reference-incidents-1669).
 
+### A service joining an already-alerted incident (#545, #2072)
+
+The alert raised when a service joins an incident that already alerted for another service: `buildIncidentAlerts` (`joinText`) and `copyPriorServiceAnalysis`, pinned by `joiner-alert.test.ts` and `joiner-alert-wiring.test.ts`.
+
 ### Provider change alerts (#1570)
 
 Operator-only. Hourly at `:00`, `provider-changes.ts` posts one embed per new pricing / billing / deprecation / breaking / limits entry from the OpenAI API changelog and the Claude Platform release notes, with a `TWEET DRAFT` built only from the entry's own sentences and an X search link. A launch announcement carrying the new model's first price is labelled `new model pricing`, not a price change. Never reaches the per-user path.
