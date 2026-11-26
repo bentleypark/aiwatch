@@ -47,7 +47,10 @@ function tierStatus(inc: { status: string; derived?: string; continuing?: true }
 }
 
 export function compareGroupedRows(a: GroupedRow, b: GroupedRow): number {
-  const aStatus = a.kind === 'single' ? tierStatus(a.incident) : dominantGroupStatus(a)
-  const bStatus = b.kind === 'single' ? tierStatus(b.incident) : dominantGroupStatus(b)
-  return (STATUS_PRIORITY[aStatus] ?? 2) - (STATUS_PRIORITY[bStatus] ?? 2)
+  return rowTier(a) - rowTier(b)
+}
+
+export function rowTier(row: GroupedRow): number {
+  const status = row.kind === 'single' ? tierStatus(row.incident) : dominantGroupStatus(row)
+  return STATUS_PRIORITY[status] ?? 2
 }

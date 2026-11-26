@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import handler from '../is-down'
 import { isDownCacheControl } from '../_shared/is-down-cache'
-import { LAST_CHECKED_CLIENT_JS } from '../_is-down/html-template'
+import { LAST_CHECKED_CLIENT_JS, LOCAL_TIME_CLIENT_JS } from '../_is-down/html-template'
 import { spyFetchWithEmptyReportFeed } from './fetch-stub'
 import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 
@@ -58,6 +58,9 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     const html = await res.text()
     expect(html).toContain('<time class="last-checked" datetime=')
     expect(html).toContain(`<script>${LAST_CHECKED_CLIENT_JS}</script>`)
+    expect(html).toContain(`<script>${LOCAL_TIME_CLIENT_JS}</script>`)
+    const { sha256Base64 } = await import('../_shared/csp-hash')
+    expect(res.headers.get('Content-Security-Policy')).toContain(`'sha256-${await sha256Base64(LOCAL_TIME_CLIENT_JS)}'`)
   })
 
   it('asks the Worker for this service\'s view, not the whole payload (#1831)', async () => {

@@ -21,7 +21,7 @@ import { CONSENT_INIT_COMMENT, consentInitScript } from './_shared/consent-init'
 import { clarityInitScript } from './_shared/clarity'
 import { cookieBannerHtml } from './_shared/cookie-banner'
 import { getSEOContent } from './_is-down/seo-content'
-import { ALERT_CTA_CSS, ERRORS_CSS, renderScheduledMaintenance, type ServiceData, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, lastCheckedTime, renderIncidentTimeline } from './_is-down/html-template'
+import { ALERT_CTA_CSS, ERRORS_CSS, renderScheduledMaintenance, type ServiceData, INCIDENT_TIMELINE_CSS, RSS_ICON_SVG, REPORT_GUARD_CLIENT_JS, alertCopyClientJs, alertCtaTitle, averageRecoveryMinutes, displayDuration, formatRecoveryMinutes, renderErrorList, LAST_CHECKED_CLIENT_JS, LOCAL_TIME_CLIENT_JS, lastCheckedTime, localTimeTag, renderIncidentTimeline } from './_is-down/html-template'
 
 export const config = { runtime: 'edge' }
 
@@ -189,6 +189,13 @@ export function incidentMeta(inc: FamilyIncident): string {
   if (inc.derived === 'status_history') return inc.duration ? `${dateStr} · down ${displayDuration(inc.duration)} that day` : dateStr
   if (inc.status === 'resolved') return inc.duration ? `${dateStr} · resolved after ${displayDuration(inc.duration)}` : `${dateStr} · resolved`
   return `${dateStr} · ongoing`
+}
+
+/** #2062 — `incidentMeta` as markup: the leading date follows the viewer's zone unless the row is a daily record. */
+function incidentMetaHtml(inc: FamilyIncident): string {
+  return esc(incidentMeta(inc)).replace(/^\d{4}-\d{2}-\d{2}/, (date) => inc.derived === 'status_history'
+    ? `<time datetime="${date}">${date}</time>`
+    : localTimeTag(new Date(inc.startedAt), date, ' data-format="date"'))
 }
 
 function renderFamilyIncidentTimeline(inc: FamilyIncident): string {
@@ -381,7 +388,7 @@ function renderGroupPage(
       <div class="incident-header">
         <span class="incident-service">${inc.component ? esc(inc.component) : inc.members.map((m) => `<a href="/is-${esc(m.slug)}-down">${esc(m.name)}</a>`).join(', ')}</span>
         <span class="incident-title">${esc(inc.title)}</span>
-        <span class="incident-meta">${esc(incidentMeta(inc))}</span>
+        <span class="incident-meta">${incidentMetaHtml(inc)}</span>
       </div>${renderFamilyIncidentTimeline(inc)}${inc.aiSummary ? `
       <div class="incident-ai">
         <span class="incident-ai-badge">${inc.status === 'resolved' ? '🤖 Post-Incident Analysis' : '🤖 AI Analysis'}</span>
@@ -613,6 +620,7 @@ ${ALERT_CTA_CSS}  .cta-member { display:flex; align-items:center; justify-conten
   ${DEVICE_CHECK_CSS}
 </style>
 <script>${LAST_CHECKED_CLIENT_JS}</script>
+<script>${LOCAL_TIME_CLIENT_JS}</script>
 </head>
 <body>
 <h1>${STATUS_EMOJI[headline]} Is ${esc(family.name)} Down?</h1>

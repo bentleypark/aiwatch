@@ -7,6 +7,7 @@ import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL }
 import { getSEOContent } from '../seo-content'
 import type { RegionStatusResult } from '../region-status'
 import { slackLogoSvg } from '../../_shared/slack-install'
+import { noJs } from '../../__tests__/local-time-helpers'
 
 // Incidents are filtered to a rolling 30-day window (the `Date.now() - 30 * 86_400_000`
 // cutoff in buildMetaDescription / renderIncidents), so test fixtures MUST use relative
@@ -64,7 +65,7 @@ describe('renderScheduledMaintenance (#1405)', () => {
     const html = upcoming([{ id: 'mw-1', title: 'API maintenance', scheduledFor: new Date(Date.UTC(2026, 10, 4, 4)).toISOString(), scheduledUntil: new Date(Date.UTC(2026, 10, 4, 10)).toISOString(), componentNames: ['API'] }])
     expect(html).toContain('Scheduled maintenance')
     expect(html).toContain('API maintenance')
-    expect(html).toContain('Nov 4, 2026, 4:00 AM–10:00 AM UTC')
+    expect(noJs(html)).toContain('Nov 4, 2026, 4:00 AM–10:00 AM UTC')
     expect(html).toContain('Affected: API')
     expect(html).not.toContain('incident-item')
   })
@@ -72,11 +73,11 @@ describe('renderScheduledMaintenance (#1405)', () => {
   it('names the end date of a window that runs past its start day', () => {
     // BFL's 52-hour window from the issue.
     const html = upcoming([{ id: 'mw-2', title: 'US Compute Maintenance', scheduledFor: new Date(Date.UTC(2026, 8, 14, 0)).toISOString(), scheduledUntil: new Date(Date.UTC(2026, 8, 16, 4)).toISOString(), componentNames: [] }])
-    expect(html).toContain('Sep 14, 2026, 12:00 AM–Sep 16, 2026, 4:00 AM UTC')
+    expect(noJs(html)).toContain('Sep 14, 2026, 12:00 AM–Sep 16, 2026, 4:00 AM UTC')
   })
   it('shows the start alone when no end is published (Better Stack), and skips an unreadable start', () => {
     const startOnly = upcoming([{ id: 'mw-3', title: 'Gateway upgrade', scheduledFor: new Date(Date.UTC(2026, 10, 4, 1)).toISOString(), scheduledUntil: null, componentNames: [] }])
-    expect(startOnly).toContain('>Nov 4, 2026, 1:00 AM UTC<')
+    expect(noJs(startOnly)).toContain('>Nov 4, 2026, 1:00 AM UTC<')
     expect(upcoming([{ id: 'mw-4', title: 'Broken', scheduledFor: 'not a date', scheduledUntil: null, componentNames: [] }])).toBe('')
   })
 
@@ -1979,7 +1980,7 @@ describe('renderIncidents — provider timeline (#1596)', () => {
       timeline: ['investigating', 'identified', 'monitoring', 'resolved'].map((s) => tl(s, null, at)),
     }] }))
     for (const [stage, label] of [['investigating', 'Investigating'], ['identified', 'Identified'], ['monitoring', 'Monitoring'], ['resolved', 'Resolved']]) {
-      expect(html).toContain(`<span class="tl-stage tl-${stage}">${label}</span> &middot; ${shown}, 14:36 UTC`)
+      expect(noJs(html)).toContain(`<span class="tl-stage tl-${stage}">${label}</span> &middot; ${shown}, 14:36 UTC`)
     }
   })
 

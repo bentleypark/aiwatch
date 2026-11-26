@@ -2,8 +2,8 @@
 
 import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl } from './slug-map'
-import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
-import { compareGroupedRows } from './incident-sort'
+import { groupIncidents, getLatestActivityMs, derivedSpanMinutes, bucketKey, autoMonitorState, AUTO_MONITOR_STATES, GROUP_THRESHOLD, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
+import { compareGroupedRows, rowTier } from './incident-sort'
 import { buildShareUrl } from './share-url'
 // #482 — is-down uses HASH-based CSP (not nonce): it stays edge-cached (s-maxage=60), and the
 // handler hashes the rendered inline scripts per-response (a content hash survives caching, unlike a
@@ -382,6 +382,93 @@ function formatDate(iso: string, dayOnly = false, derivedDay?: string): string {
   return dayOnly ? day : `${day}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
 }
 
+/** #2062 — `LOCAL_TIME_CLIENT_JS` rewrites this in the viewer's zone; `text` is the no-JS fallback. */
+export function localTimeTag(at: Date, text: string, attrs = ''): string {
+  return `<time class="local-time" datetime="${at.toISOString()}"${attrs}>${esc(text)}</time>`
+}
+
+/** `formatDate` as markup; a day-only value gets no `local-time` class. */
+function dateHtml(iso: string, dayOnly = false, derivedDay?: string): string {
+  const d = new Date(dayOnly && derivedDay ? `${derivedDay}T12:00:00Z` : iso)
+  const text = formatDate(iso, dayOnly, derivedDay)
+  if (Number.isNaN(d.getTime())) return esc(text)
+  return dayOnly ? `<time datetime="${d.toISOString().slice(0, 10)}">${esc(text)}</time>` : localTimeTag(d, text)
+}
+
+/** #2062 — the default shape is `src/utils/time.js`'s `formatDate`; the range shapes are
+ *  `src/utils/maintenance.js`'s `formatMaintenanceRange`. */
+export const LOCAL_TIME_CLIENT_JS = `document.addEventListener('DOMContentLoaded',function(){
+function fmt(d,o,l){o.hourCycle='h23';return new Intl.DateTimeFormat(l||'en-US',o).format(d)}
+function day(d){return fmt(d,{year:'numeric',month:'2-digit',day:'2-digit'},'en-CA')}
+function full(d){return fmt(d,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'})}
+var t=document.querySelectorAll('time.local-time[datetime]');
+for(var i=0;i<t.length;i++){
+var d=new Date(t[i].getAttribute('datetime'));
+var k=t[i].getAttribute('data-format');
+t[i].textContent=k==='date'?day(d)
+:k==='range-start'?fmt(d,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+:k==='range-end'&&day(new Date(t[i].getAttribute('data-from')))===day(d)?fmt(d,{hour:'2-digit',minute:'2-digit',timeZoneName:'short'})
+:full(d)}
+var z=document.querySelectorAll('.local-time-utc');
+for(var j=0;j<z.length;j++)z[j].textContent=''});`
+
+/** #2062 — regroups the incident list by the viewer's local day, as the dashboard groups it. */
+export function regroupClientJs(): string {
+  return `document.addEventListener('DOMContentLoaded',function(){
+var card=document.querySelector('[data-regroup]');if(!card)return;
+var STATES=${JSON.stringify(AUTO_MONITOR_STATES)};
+var fmt=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'});
+function attr(el,a){return el.getAttribute(a)}
+function time(el){return el.querySelector('.incident-meta>time')}
+function parse(html){var box=document.createElement('div');box.innerHTML=html;return box}
+var all=Array.prototype.map.call(card.querySelectorAll('[data-index]'),function(el){
+return {el:el,index:+attr(el,'data-index'),active:+attr(el,'data-active'),tier:+attr(el,'data-tier'),day:attr(el,'data-day'),span:attr(el,'data-span')}});
+all.sort(function(a,b){return a.index-b.index});
+var buckets=new Map(),plain=[],runs=[],rows=[];
+all.forEach(function(u){
+if(u.el.classList.contains('incident-group')){runs.push(u);return}
+var title=attr(u.el,'data-bucket'),at=time(u.el);
+if(title===null||!at){plain.push(u);return}
+var key=JSON.stringify([fmt.format(new Date(attr(at,'datetime'))),title]),b=buckets.get(key);
+if(!b){buckets.set(key,{title:title,units:[u]})}else{b.units.push(u)}});
+buckets.forEach(function(b){
+if(b.units.length<${GROUP_THRESHOLD}){rows.push.apply(rows,b.units);return}
+function pick(k){return b.units.map(function(u){return u[k]})}
+rows.push({title:b.title,index:b.units[0].index,active:Math.max.apply(null,pick('active')),tier:Math.min.apply(null,pick('tier')),day:null,items:pick('el')})});
+var units=rows.concat(plain,runs);
+function name(u){return u.el.querySelector('.incident-title').textContent}
+units.sort(function(a,b){
+if(a.day===null||a.day!==b.day)return b.active-a.active||a.index-b.index;
+if(a.span!==null&&b.span!==null&&a.span!==b.span)return b.span-a.span;
+return name(a).localeCompare(name(b))});
+units.sort(function(a,b){return a.tier-b.tier});
+var nodes=units.map(function(u){
+if(!u.items)return u.el;
+var g=parse(${JSON.stringify(groupHtml('', '', '', ''))}).firstChild;
+var seen=u.items.map(function(el){return attr(el,'data-state')});
+var states=STATES.filter(function(s){return seen.indexOf(s)>=0});
+var head=g.querySelector('.incident-group-title');
+head.prepend((states.length?states.join(' / ')+': ':'')+u.title);
+head.querySelector('span').textContent='\\u00b7 '+u.items.length+'\\u00d7';
+var times=u.items.map(time).sort(function(x,y){return attr(x,'datetime')<attr(y,'datetime')?-1:1});
+var meta=g.querySelector('.incident-group-meta');
+if(!u.items.every(function(el){return attr(el,'data-status')===attr(u.items[0],'data-status')}))meta.append(times[0].cloneNode(true),' \\u2192 ');
+meta.append(times[times.length-1].cloneNode(true));
+var list=g.querySelector('.incident-group-entries');
+u.items.forEach(function(el){list.append(el)});
+return g});
+card.textContent='';
+nodes.slice(0,${INCIDENT_PREVIEW_ROWS}).forEach(function(n){card.append(n)});
+var rest=nodes.slice(${INCIDENT_PREVIEW_ROWS});
+if(!rest.length)return;
+var more=parse(${JSON.stringify(moreRowsHtml('', ''))});
+more.querySelector('.ih-toggle').setAttribute('aria-label','Show '+rest.length+' more incidents');
+more.querySelector('.ih-more-open').textContent='Show '+rest.length+' more';
+var box=more.querySelector('.ih-rest');
+rest.forEach(function(n){box.append(n)});
+while(more.firstChild)card.append(more.firstChild)});`
+}
+
 /** True when this incident's timestamp was reconstructed by AIWatch rather than published. */
 function isDailyRecordIncident(inc: { derived?: string } | null | undefined): boolean {
   return inc?.derived === 'status_history'
@@ -448,15 +535,15 @@ export function renderScheduledMaintenance(windows: ServiceData['scheduledMainte
     if (Number.isNaN(start.getTime())) return ''
     const full = (d: Date) => d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })
     const range = end && !Number.isNaN(end.getTime())
-      ? `${full(start)}–${end.toISOString().slice(0, 10) === start.toISOString().slice(0, 10) ? end.toLocaleString('en-US', { timeStyle: 'short', timeZone: 'UTC' }) : full(end)} UTC`
-      : `${full(start)} UTC`
+      ? `${localTimeTag(start, full(start), ' data-format="range-start"')}–${localTimeTag(end, end.toISOString().slice(0, 10) === start.toISOString().slice(0, 10) ? end.toLocaleString('en-US', { timeStyle: 'short', timeZone: 'UTC' }) : full(end), ` data-format="range-end" data-from="${start.toISOString()}"`)}`
+      : localTimeTag(start, full(start))
     const components = window.componentNames.length ? `<div style="font-size:13px;color:#8b949e;margin:6px 0 0">Affected: ${esc(window.componentNames.join(', '))}</div>` : ''
     const description = window.description ? `<p style="margin:6px 0 0">${esc(window.description)}</p>` : ''
     const services = window.services?.length ? `<div style="font-size:13px;color:#8b949e;margin:6px 0 0">Services: ${esc(window.services.join(', '))}</div>` : ''
     return `<div style="background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-left:3px solid #58a6ff;border-radius:8px;padding:16px;margin:12px 0">
 <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:6px">${phase === 'ongoing' ? 'Maintenance in progress' : 'Scheduled maintenance'}</div>
 <div style="font-weight:600">${esc(window.title)}</div>
-<div style="font-size:13px;color:#8b949e;margin:4px 0 0">${esc(range)}</div>${description}${components}${services}
+<div style="font-size:13px;color:#8b949e;margin:4px 0 0">${range}<span class="local-time-utc"> UTC</span></div>${description}${components}${services}
 </div>`
   }).join('')
 }
@@ -739,6 +826,8 @@ ${DEVICE_CHECK_CSS}
 @media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}.fallback-item{gap:10px}}
 </style>
 <script>${LAST_CHECKED_CLIENT_JS}</script>
+<script>${regroupClientJs()}</script>
+<script>${LOCAL_TIME_CLIENT_JS}</script>
 </head>
 <body>
 <div class="container">
@@ -1276,7 +1365,7 @@ ${/* #1268 — a stale source with NOTHING behind it asserts neither branch. "No
       while still serving a live badge AND live incidents — `readFlashdutyStatus` preserves them
       deliberately. Withholding on bare `stale` deleted the only surviving description of what was wrong
       from a page answering "Yes — down": `renderIncidents` is stale-gated too, and the #1104 note is
-      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(incidentDurationEn(lastIncident)!)}${isDailyRecordIncident(lastIncident) && lastIncident.continuing ? ', ongoing' : ''})` : lastIncident.status === 'resolved' ? ' (duration unknown)' : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : lastIncident.startUnknown ? ' &mdash; no usable time range for this incident' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
+      `!stale`-gated, so the page said an outage was happening and named nothing. */''}${stale && incidents.length === 0 ? '' : lastIncident ? `<p class="meta">Last incident: ${dateHtml(lastIncident.startedAt, isDailyRecordIncident(lastIncident), lastIncident.derivedDay)} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(incidentDurationEn(lastIncident)!)}${isDailyRecordIncident(lastIncident) && lastIncident.continuing ? ', ongoing' : ''})` : lastIncident.status === 'resolved' ? ' (duration unknown)' : ' (ongoing)'}${isDailyRecordIncident(lastIncident) ? ' &mdash; start time not published by the provider' : lastIncident.startUnknown ? ' &mdash; no usable time range for this incident' : ''}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
       "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
       cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
@@ -1583,7 +1672,7 @@ const INCIDENT_ROW_CAP = 20
 // dashboard ServiceDetails INCIDENT_HISTORY_PREVIEW so both surfaces preview the same count.
 const INCIDENT_PREVIEW_ROWS = 5
 
-function renderIncidentSingle(inc: GroupingIncident, hideStatus = false): string {
+function renderIncidentSingle(inc: GroupingIncident, hideStatus = false, attrs = ''): string {
   const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
   const stillDown = isDailyRecordIncident(inc) && (inc.continuing || inc.status !== 'resolved')
   const statusColor = stillDown ? '#e86235' : inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
@@ -1596,9 +1685,9 @@ function renderIncidentSingle(inc: GroupingIncident, hideStatus = false): string
     : isDailyRecordIncident(inc) ? ''
     : inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : ' &middot; duration unknown'
   const impactMeta = impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''
-  return `<div class="incident-item">
+  return `<div class="incident-item"${attrs}>
 <div class="incident-title">${esc(inc.title)}</div>
-<div class="incident-meta mono">${esc(formatDate(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay))}${hideStatus ? '' : ` &middot; <span style="color:${statusColor}">${statusText}</span>`}${durationOrElapsed}${impactMeta}</div>
+<div class="incident-meta mono">${dateHtml(inc.startedAt, isDailyRecordIncident(inc), inc.derivedDay)}${hideStatus ? '' : ` &middot; <span style="color:${statusColor}">${statusText}</span>`}${durationOrElapsed}${impactMeta}</div>
 ${renderIncidentTimeline(inc)}</div>`
 }
 
@@ -1625,7 +1714,7 @@ function renderTimelineStep(step: { stage: string; text: string | null; at: stri
   const known = Object.hasOwn(TIMELINE_STAGE_LABEL, step.stage)
   const label = known ? TIMELINE_STAGE_LABEL[step.stage] : 'Update'
   const text = step.text ? `<div class="tl-text">${esc(step.text)}</div>` : ''
-  return `<div class="tl-step"><div class="tl-head mono"><span class="tl-stage${known ? ` tl-${step.stage}` : ''}">${label}</span> &middot; ${esc(formatDate(step.at))}</div>${text}</div>`
+  return `<div class="tl-step"><div class="tl-head mono"><span class="tl-stage${known ? ` tl-${step.stage}` : ''}">${label}</span> &middot; ${dateHtml(step.at)}</div>${text}</div>`
 }
 
 export function renderIncidentTimeline(inc: Pick<GroupingIncident, 'status' | 'timeline'>): string {
@@ -1642,7 +1731,7 @@ export function renderIncidentTimeline(inc: Pick<GroupingIncident, 'status' | 't
 
 /** #1623 — a multi-day outage: its days, whether it still runs, and the day totals summed. */
 function runGroupMeta(g: GroupRow): string {
-  const day = (d?: string) => esc(formatDate(`${d}T12:00:00Z`, true, d))
+  const day = (d?: string) => dateHtml(`${d}T12:00:00Z`, true, d)
   const downMin = Math.ceil((g.downSec ?? 0) / 60)
   const dur = downMin >= 60 ? displayDuration(`${Math.floor(downMin / 60)}h ${downMin % 60}m`) : `${downMin}m`
   const total = downMin > 0 ? ` &middot; ${esc(dur)} down${g.ongoing ? ' + ongoing' : ''}` : ''
@@ -1651,19 +1740,57 @@ function runGroupMeta(g: GroupRow): string {
     : `${day(g.startDay)} &rarr; ${day(g.endDay)}${total}`
 }
 
-function renderIncidentGroup(g: GroupRow): string {
-  // <details open> so crawlers always read the full entries. CSS in renderPage
-  // styles the expanded/collapsed state; noscript users retain full access.
-  const summary = `${esc(g.heading)} <span class="mono" style="color:#8b949e">&middot; ${g.run ? `${g.count} days` : `${g.count}×`}</span>`
-  const headMeta = g.run ? runGroupMeta(g)
-    : g.uniformStatus
-    ? `${esc(formatDate(g.rangeEnd))}`
-    : `${esc(formatDate(g.rangeStart))} &rarr; ${esc(formatDate(g.rangeEnd))}`
-  const entries = g.entries.map((inc) => renderIncidentSingle(inc, !!g.run && inc.status === 'resolved')).join('\n')
-  return `<details open class="incident-group">
-<summary><span class="incident-group-title">${summary}</span><span class="incident-group-meta mono">${headMeta}</span></summary>
+// <details open> so crawlers always read the full entries. CSS in renderPage
+// styles the expanded/collapsed state; noscript users retain full access.
+function groupHtml(heading: string, count: string, meta: string, entries: string, attrs = ''): string {
+  return `<details open class="incident-group"${attrs}>
+<summary><span class="incident-group-title">${heading} <span class="mono" style="color:#8b949e">&middot; ${count}</span></span><span class="incident-group-meta mono">${meta}</span></summary>
 <div class="incident-group-entries">${entries}</div>
 </details>`
+}
+
+function renderIncidentGroup(g: GroupRow, attrsOf: RegroupAttrs): string {
+  const headMeta = g.run ? runGroupMeta(g)
+    : g.uniformStatus
+    ? dateHtml(g.rangeEnd)
+    : `${dateHtml(g.rangeStart)} &rarr; ${dateHtml(g.rangeEnd)}`
+  const entries = g.entries.map((inc) => renderIncidentSingle(inc, !!g.run && inc.status === 'resolved', g.run ? '' : attrsOf.item(inc))).join('\n')
+  return groupHtml(esc(g.heading), g.run ? `${g.count} days` : `${g.count}×`, headMeta, entries, g.run ? attrsOf.run(g) : '')
+}
+
+function moreRowsHtml(count: number | '', rows: string): string {
+  return `<input type="checkbox" id="ih-more" class="ih-toggle" aria-label="Show ${count} more incidents">
+<div class="ih-rest">${rows}</div>
+<label for="ih-more" class="ih-more-label mono"><span class="ih-more-open">Show ${count} more</span><span class="ih-more-close">Show less</span></label>`
+}
+
+interface RegroupAttrs {
+  item: (inc: GroupingIncident) => string
+  run: (row: GroupRow) => string
+}
+const NO_REGROUP: RegroupAttrs = { item: () => '', run: () => '' }
+
+/** #2062 — the `data-*` `regroupClientJs` redoes day grouping from. Null when no two incidents share a
+ *  title key. */
+function regroupAttrs(recent: GroupingIncident[]): RegroupAttrs | null {
+  const keys = recent.map(bucketKey).filter((k) => k !== null)
+  if (new Set(keys).size === keys.length) return null
+  const order = (members: GroupingIncident[], row: GroupRow | SingleRow) =>
+    ` data-index="${Math.min(...members.map((m) => recent.indexOf(m)))}" data-active="${Math.max(...members.map(getLatestActivityMs))}" data-tier="${rowTier(row)}"`
+  return {
+    item: (inc) => {
+      const own = order([inc], { kind: 'single', incident: inc })
+      const key = bucketKey(inc)
+      if (key !== null) {
+        const state = autoMonitorState(inc)
+        return `${own} data-bucket="${esc(key)}" data-status="${esc(inc.status)}"${state ? ` data-state="${esc(state)}"` : ''}`
+      }
+      if (inc.derived !== 'status_history' || inc.derivedDay === undefined) return own
+      const span = derivedSpanMinutes(inc)
+      return `${own} data-day="${esc(inc.derivedDay)}"${span === null ? '' : ` data-span="${span}"`}`
+    },
+    run: (row) => order(row.entries, row),
+  }
 }
 
 /**
@@ -1762,8 +1889,10 @@ ${historyLink}`
     .slice()
     .sort(compareGroupedRows)
     .slice(0, INCIDENT_ROW_CAP)
+  const regroup = regroupAttrs(recent)
+  const attrsOf = regroup ?? NO_REGROUP
   const renderRow = (row: GroupRow | SingleRow): string =>
-    row.kind === 'group' ? renderIncidentGroup(row) : renderIncidentSingle((row as SingleRow).incident)
+    row.kind === 'group' ? renderIncidentGroup(row, attrsOf) : renderIncidentSingle(row.incident, false, attrsOf.item(row.incident))
   // Show the first INCIDENT_PREVIEW_ROWS rows; collapse the rest behind a CSS-only toggle that
   // stays anchored at the BOTTOM of the list (the overflow rows reveal ABOVE the toggle, matching
   // the dashboard ServiceDetails "show more" button). A checkbox-hack (no JS, CSP-clean) is used
@@ -1773,13 +1902,9 @@ ${historyLink}`
   const rest = rows.slice(INCIDENT_PREVIEW_ROWS)
   // The fixed id="ih-more" assumes ONE incident list per page (renderIncidents is called once,
   // see the single call site) — revisit if a future page renders two service incident lists.
-  const moreSection = rest.length > 0
-    ? `<input type="checkbox" id="ih-more" class="ih-toggle" aria-label="Show ${rest.length} more incidents">
-<div class="ih-rest">${rest.map(renderRow).join('\n')}</div>
-<label for="ih-more" class="ih-more-label mono"><span class="ih-more-open">Show ${rest.length} more</span><span class="ih-more-close">Show less</span></label>`
-    : ''
+  const moreSection = rest.length > 0 ? moreRowsHtml(rest.length, rest.map(renderRow).join('\n')) : ''
   return `${heading}
-<div class="card">${preview}${moreSection}</div>
+<div class="card"${regroup ? ' data-regroup' : ''}>${preview}${moreSection}</div>
 ${historyLink}`
 }
 

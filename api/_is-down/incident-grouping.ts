@@ -1,8 +1,8 @@
 // Server-side incident grouping for /is-X-down SSR pages.
 //
-// Keep in sync with src/utils/incidentGrouping.js (SPA side). The SPA defaults to the
-// viewer's local timezone because its output is rendered client-side; the SSR page
-// must be deterministic across visitors, so this port defaults to 'UTC'.
+// Keep in sync with src/utils/incidentGrouping.js (SPA side). The SPA groups by the viewer's local
+// day; the SSR page must be deterministic across visitors, so it renders UTC days and
+// `regroupClientJs` (html-template.ts) regroups in the browser.
 //
 // Background (same as SPA): BetterStack-backed feeds (Together, HuggingFace, Modal;
 // fireworks left this group in #1198 — migrated to incident.io) emit a separate
@@ -47,7 +47,7 @@ export function isGenericTitle(title: string | null | undefined): boolean {
 // Used as the cross-row sort key in `groupIncidents`
 // so the visible Incidents / ServiceDetails / Is X Down order matches Overview
 // (#411 follow-up to #406).
-function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedAt?: string | null; derived?: string; continuing?: true }): number {
+export function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedAt?: string | null; derived?: string; continuing?: true }): number {
   // #1623 — a continuing day row has not resolved; its `resolvedAt` is only its day total's end.
   if (inc.status === 'resolved' && inc.resolvedAt && !(inc.derived === 'status_history' && inc.continuing)) {
     return new Date(inc.resolvedAt).getTime()
@@ -60,6 +60,13 @@ function getLatestActivityMs(inc: { status: string; startedAt: string; resolvedA
  *  rows that read identically and ties two that do not. */
 function displayedMinutes(ms: number): number {
   return Math.max(1, Math.ceil(ms / 60_000))
+}
+
+/** The length `compareDerivedSameDay` orders by; null for a record with no end. */
+export function derivedSpanMinutes(i: GroupingIncident): number | null {
+  if (!i.startedAt || !i.resolvedAt) return null
+  const ms = new Date(i.resolvedAt).getTime() - new Date(i.startedAt).getTime()
+  return Number.isFinite(ms) ? displayedMinutes(ms) : null
 }
 
 /**
@@ -79,13 +86,8 @@ function compareDerivedSameDay(
 ): number | null {
   if (a.derived !== 'status_history' || b.derived !== 'status_history') return null
   if (a.derivedDay === undefined || a.derivedDay !== b.derivedDay) return null
-  const span = (i: GroupingIncident) => {
-    if (!i.startedAt || !i.resolvedAt) return null
-    const ms = new Date(i.resolvedAt).getTime() - new Date(i.startedAt).getTime()
-    return Number.isFinite(ms) ? displayedMinutes(ms) : null
-  }
-  const aMin = span(a)
-  const bMin = span(b)
+  const aMin = derivedSpanMinutes(a)
+  const bMin = derivedSpanMinutes(b)
   if (aMin !== null && bMin !== null && aMin !== bMin) return bMin - aMin
   return (a.title ?? '').localeCompare(b.title ?? '')
 }
@@ -157,14 +159,18 @@ export function normalizeTitle(title: string | null | undefined): string {
 // changes during one episode, so the group key is what follows it and the row names the states seen.
 // Lockstep with the SPA.
 const AUTO_MONITOR_STATE_PREFIX_RE = /^(degraded performance|partial outage|service outage):\s*/i
-const AUTO_MONITOR_STATES = ['Degraded performance', 'Partial outage', 'Service outage']
+export const AUTO_MONITOR_STATES = ['Degraded performance', 'Partial outage', 'Service outage']
+export function autoMonitorState(inc: GroupingIncident): string | undefined {
+  const found = inc.autoMonitor ? AUTO_MONITOR_STATE_PREFIX_RE.exec(inc.title)?.[1].toLowerCase() : undefined
+  return AUTO_MONITOR_STATES.find((s) => s.toLowerCase() === found)
+}
 function groupTitle(inc: GroupingIncident): string {
   const title = normalizeTitle(inc.title)
   return inc.autoMonitor ? title.replace(AUTO_MONITOR_STATE_PREFIX_RE, '') : title
 }
 function groupHeading(entries: GroupingIncident[], key: string): string {
-  const seen = new Set(entries.map((e) => (e.autoMonitor ? AUTO_MONITOR_STATE_PREFIX_RE.exec(e.title)?.[1].toLowerCase() : undefined)))
-  const states = AUTO_MONITOR_STATES.filter((s) => seen.has(s.toLowerCase()))
+  const seen = new Set(entries.map(autoMonitorState))
+  const states = AUTO_MONITOR_STATES.filter((s) => seen.has(s))
   return states.length ? `${states.join(' / ')}: ${key}` : key
 }
 
@@ -199,6 +205,29 @@ export function isAutoMonitorTitle(title: string | null | undefined): boolean {
   return AUTOMONITOR_TITLE_RE.test(t) || SERVICE_DEGRADATION_FOR_RE.test(t)
 }
 
+/** The title `inc` groups under with others of its day; null when it never groups by day. */
+export function bucketKey(inc: GroupingIncident): string | null {
+  // Real human-curated incidents (impact != null) skip clustering — EXCEPT
+  // (a) Statuspage auto-monitoring placeholders (Character.AI, #387),
+  // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
+  // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
+  // blips (#599, Mistral), and (c) worker-tagged `autoMonitor` incidents (#983, Twelve Labs),
+  // whose `impact` may be 'major' purely because one sub-component read `major_outage`.
+  // All cluster because the impact is boilerplate, not curation.
+  // Lockstep with src/utils/incidentGrouping.js.
+  const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
+  // #1292 — never group a synthesized incident. Kept in lockstep with the SPA copy in
+  // `src/utils/incidentGrouping.js`: it wears the "<resource> — down" suffix `isFlapTitle`
+  // keys on but is one whole DAY of downtime, and grouping buckets on the VIEWER's local day, so it
+  // could merge with a real feed item and print the reconstructed anchor at minute precision (a
+  // group range carries no `dayOnly`).
+  if (inc.derived === 'status_history'
+    || (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise)) {
+    return null
+  }
+  return groupTitle(inc)
+}
+
 function localDayKey(iso: string, timeZone: string): string {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone })
 }
@@ -215,15 +244,6 @@ export function groupIncidents(
   const runs = new Map<string, { info: NonNullable<GroupingIncident['outageRun']>; entries: GroupingIncident[]; firstIdx: number }>()
 
   incidents.forEach((inc, idx) => {
-    // Real human-curated incidents (impact != null) skip clustering — EXCEPT
-    // (a) Statuspage auto-monitoring placeholders (Character.AI, #387),
-    // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
-    // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
-    // blips (#599, Mistral), and (c) worker-tagged `autoMonitor` incidents (#983, Twelve Labs),
-    // whose `impact` may be 'major' purely because one sub-component read `major_outage`.
-    // All cluster because the impact is boilerplate, not curation.
-    // Lockstep with src/utils/incidentGrouping.js.
-    const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
     // #1623 — consecutive day rows the worker proved to be ONE outage group on that key, across days.
     const info = inc.derived === 'status_history' ? inc.outageRun : undefined
     if (info) {
@@ -232,18 +252,12 @@ export function groupIncidents(
       runs.set(info.id, run)
       return
     }
-    // #1292 — never group a synthesized incident. Kept in lockstep with the SPA copy in
-    // `src/utils/incidentGrouping.js`: it wears the "<resource> — down" suffix `isFlapTitle`
-    // keys on but is one whole DAY of downtime, and grouping buckets on the VIEWER's local day, so it
-    // could merge with a real feed item and print the reconstructed anchor at minute precision (a
-    // group range carries no `dayOnly`).
-    if (inc.derived === 'status_history'
-      || (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise)) {
+    const nt = bucketKey(inc)
+    if (nt === null) {
       ungroupable.push({ idx, inc })
       return
     }
     const dayKey = localDayKey(inc.startedAt, timeZone)
-    const nt = groupTitle(inc)
     const key = `${dayKey}::${nt}`
     let bucket = buckets.get(key)
     if (!bucket) {
