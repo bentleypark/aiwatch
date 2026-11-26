@@ -163,6 +163,17 @@ export function lastUiEditIndex(entries) {
  *  was not enough. */
 const HARNESS_WRAPPER_RE = /^\s*<(?:command-|local-command|task-notification|system-reminder|bash-input|bash-stdout|bash-stderr)/
 
+/** The text blocks of a turn that may be the human's own words. A string is one block. A tool-result turn
+ *  has none. Blocks past the first are read only when the app marks the turn `origin.kind: "human"`: in a
+ *  session with linked sessions it puts its own `<system-reminder>` note first and the typed text after. */
+function typedBlocks(entry) {
+  const c = entry.message?.content
+  if (typeof c === 'string') return [c]
+  if (!Array.isArray(c) || c.some((b) => b?.type === 'tool_result')) return []
+  const readable = entry.origin?.kind === 'human' ? c : c.slice(0, 1)
+  return readable.filter((b) => b?.type === 'text').map((b) => b.text ?? '')
+}
+
 /** True if a genuine human text turn (external, not meta/sidechain) matching `re` appears at an index
  *  > afterIdx. The agent cannot author such a turn → unfabricable. */
 export function hasUserTurnAfter(entries, afterIdx, re) {
@@ -174,14 +185,8 @@ export function hasUserTurnAfter(entries, afterIdx, re) {
     // and lifts this gate. Every compaction turn in this project's transcripts satisfies CONFIRM_RE, and
     // the flag has not appeared on a human turn — so skipping it costs no real confirmation (#1150).
     if (e?.type !== 'user' || e.isMeta === true || e.isSidechain === true || e.isCompactSummary === true) continue
-    // Real human prompts store message.content as a STRING; tool-result turns store an ARRAY whose
-    // first block is a tool_result (NOT a human message — skip those). Some clients use an array with
-    // a leading text block. Extract the human text from string OR array-with-text only.
-    const c = e.message?.content
-    const text = typeof c === 'string' ? c
-      : (Array.isArray(c) && c[0]?.type === 'text' ? (c[0].text ?? '') : '')
-    if (!text || HARNESS_WRAPPER_RE.test(text)) continue
-    if (re.test(text)) return true
+    // Each block is judged alone: a harness wrapper block neither counts nor hides the block beside it.
+    if (typedBlocks(e).some((text) => !HARNESS_WRAPPER_RE.test(text) && re.test(text))) return true
   }
   return false
 }
