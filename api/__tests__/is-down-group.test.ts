@@ -6,9 +6,10 @@ import handler from '../is-down-group'
 
 vi.mock('../_shared/clarity', () => ({ clarityInitScript: () => '<script data-clarity-wired></script>' }))
 import { isDownCacheControl } from '../_shared/is-down-cache'
-import { LAST_CHECKED_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
+import { LAST_CHECKED_CLIENT_JS, LOCAL_TIME_CLIENT_JS, REPORT_GUARD_CLIENT_JS } from '../_is-down/html-template'
 import { makeLocalStorage } from '../../src/utils/__tests__/localStorageStub.js'
 import { spyFetchAsWorker } from './fetch-stub'
+import { runLocalTimeScript, viewIn } from './local-time-helpers'
 import { expectEveryStoreLink } from '../_shared/__tests__/expect-store-links'
 import { LAST_GOOD_COPY_URL } from '../../worker/src/last-good-copy-path'
 import { DEVICE_CHECK_JS } from '../_shared/device-check'
@@ -110,6 +111,37 @@ describe('is-down-group.ts', () => {
     const html = await (await handler(makeReq('xai'))).text()
     const card = html.slice(html.indexOf('Maintenance in progress'), html.indexOf('Recent Incidents'))
     expect(card).toContain('Services: Grok Bot, Cursor')
+  })
+
+  it('#2062 — ships the local-time script, hashed into script-src', async () => {
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([{ id: 'claude', name: 'Claude API', status: 'operational' }]))
+    const res = await handler(makeReq('claude'))
+    expect(await res.text()).toContain(`<script>${LOCAL_TIME_CLIENT_JS}</script>`)
+    const { sha256Base64 } = await import('../_shared/csp-hash')
+    expect(res.headers.get('Content-Security-Policy')).toContain(`'sha256-${await sha256Base64(LOCAL_TIME_CLIENT_JS)}'`)
+  })
+
+  it('#2062 — an incident row date follows the viewer, a stated day does not', async () => {
+    const at = new Date(Date.now() - 2 * 86_400_000)
+    at.setUTCHours(23, 0, 0, 0)
+    const startedAt = at.toISOString()
+    const day = startedAt.slice(0, 10)
+    const seoulDay = new Date(at.getTime() + 9 * 3_600_000).toISOString().slice(0, 10)
+    fetchMock = spyFetchAsWorker().mockResolvedValueOnce(statusResponse([
+      { id: 'claude', name: 'Claude API', status: 'operational', incidents: [
+        { id: 'published', title: 'Published', status: 'resolved', startedAt, duration: '1h 0m' },
+        { id: 'record', title: 'Record', status: 'resolved', startedAt, duration: '2h 0m', derived: 'status_history', derivedDay: day } as MockIncident,
+      ] },
+    ]))
+    const html = await (await handler(makeReq('claude'))).text()
+    expect(html).toContain(`<span class="incident-meta"><time class="local-time" datetime="${startedAt}" data-format="date">${day}</time> · resolved after 1h</span>`)
+    expect(html).toContain(`<span class="incident-meta"><time datetime="${day}">${day}</time> · down 2h that day</span>`)
+
+    viewIn('Asia/Seoul')
+    runLocalTimeScript([...html.matchAll(/<span class="incident-meta">.*?<\/span>/g)].map((m) => m[0]).join(''))
+    expect([...document.querySelectorAll('.incident-meta')].map((el) => el.textContent).sort()).toEqual(
+      [`${day} · down 2h that day`, `${seoulDay} · resolved after 1h`].sort())
+    document.body.innerHTML = ''
   })
 
   it('requests the cached payload without the time series it never reads (#1531)', async () => {

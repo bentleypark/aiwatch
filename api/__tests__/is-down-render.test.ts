@@ -6,6 +6,7 @@ import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/u
 import { getSEOContent } from '../_is-down/seo-content'
 import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 import { expectEveryStoreLink } from '../_shared/__tests__/expect-store-links'
+import { noJs } from './local-time-helpers'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
 // literal. A stray backtick in a comment there once truncated the literal → the Edge SSR built a
@@ -626,7 +627,7 @@ describe('#1292 — a reconstructed timestamp is not published at minute precisi
     impact: 'minor', startedAt: startedAt.toISOString(), resolvedAt: resolvedAt.toISOString(),
     duration: '17h 18m', timeline: [],
   }
-  const render = (incident: object) => renderPage('helicone', { ...base, incidents: [incident] } as never, seo, [], null)
+  const render = (incident: object) => noJs(renderPage('helicone', { ...base, incidents: [incident] } as never, seo, [], null))
 
   it('drops the time of day in BOTH the header and the incident row, and says why', () => {
     const html = render({ ...inc, derived: 'status_history' })
@@ -756,7 +757,7 @@ describe('#1622 — a status_history day row on the is-down page', () => {
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     const start = new Date(`${d(10)}T12:00:00Z`)
     expect(html).toContain('&middot; 11 days</span>')
-    expect(html).toContain(`${MONTHS[start.getUTCMonth()]} ${start.getUTCDate()} &rarr; <span style="color:#e86235">ongoing</span>`)
+    expect(noJs(html)).toContain(`${MONTHS[start.getUTCMonth()]} ${start.getUTCDate()} &rarr; <span style="color:#e86235">ongoing</span>`)
   })
 
   it('#1623 — a finished run states its last day', () => {
@@ -767,7 +768,7 @@ describe('#1622 — a status_history day row on the is-down page', () => {
     const html = renderPage('helicone', { ...base, incidents: rows } as never, seo, [], null)
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     const [a, b] = [d(2), d(1)].map((x) => new Date(`${x}T12:00:00Z`)).map((x) => `${MONTHS[x.getUTCMonth()]} ${x.getUTCDate()}`)
-    expect(html).toContain(`${a} &rarr; ${b} &middot; 4h down`)
+    expect(noJs(html)).toContain(`${a} &rarr; ${b} &middot; 4h down`)
   })
 
   it('#1623 — lists today\'s ongoing row above yesterday\'s continuing one', () => {
