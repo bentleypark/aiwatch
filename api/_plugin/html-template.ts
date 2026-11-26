@@ -135,7 +135,7 @@ ul.caveats{list-style:disc;padding-left:20px;color:var(--text2);font-size:13px;l
 <script${nonceAttr(nonce)}>
 (function(){
   // Delegated GA4 click tracking — CSP-clean (no inline handlers). Fires only after consent
-  // (gtag is a no-op until the cookie banner grants analytics_storage).
+  // (gtag does not exist until analytics consent, so the guard below drops the click, #2070).
   document.addEventListener('click', function (e) {
     var el = e.target && e.target.closest ? e.target.closest('[data-ga]') : null;
     if (!el || typeof gtag !== 'function') return;

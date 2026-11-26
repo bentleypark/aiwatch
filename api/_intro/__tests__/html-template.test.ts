@@ -64,7 +64,7 @@ describe('renderLandingPage — CSP-clean (#482)', () => {
     const tags = html.match(/<script(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>/g) ?? []
     expect(tags.length).toBeGreaterThanOrEqual(3) // consent init + interactivity + cookie banner
     for (const tag of tags) expect(tag).toContain('nonce="NONCE123"')
-    expect(html).toMatch(/<script async nonce="NONCE123" src="https:\/\/www\.googletagmanager\.com/)
+    expect(html).not.toMatch(/<script[^>]*\ssrc="https:\/\/www\.googletagmanager\.com/) // #2070
     expect(html).toMatch(/<script type="application\/ld\+json">/)
   })
 

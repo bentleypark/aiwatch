@@ -78,7 +78,7 @@ Run the manual experiment across the **next 3 outages**, then check GA4:
 
 Sessions (not raw clicks) because GA4 reports them natively. Record the outcome on #348 before deciding.
 
-> **Measurement caveat — the `utm_source=twitter` count undercounts real Twitter traffic.** The `/is-*-down` pages run GA4 in **Consent Mode v2 default-denied** (`api/_shared/consent-init.ts`): gtag loads on every visit, but visitors who haven't accepted cookies are recorded as **cookieless pings with no `client_id`**, which GA4 cannot attribute to a source — they land under **`(not set)`**, not `utm_source=twitter`. So a Twitter visitor who doesn't consent leaks into the `(not set)` bucket. True Twitter traffic = `utm_source=twitter` sessions **+ an unobservable share of `(not set)`**. Read the ≥50 threshold as a *floor* (consented visitors only); if `utm_source=twitter` is near the gate, the real signal is likely above it. (The SPA at `ai-watch.dev` differs — it sends nothing until consent, so it doesn't generate `(not set)`.)
+> **Measurement caveat — the `utm_source=twitter` count undercounts real Twitter traffic.** No `/is-*-down` page loads gtag.js without analytics consent (#2070), so GA4 does not receive a visitor who has not accepted. Read the ≥50 threshold as a *floor* (consented visitors only); if `utm_source=twitter` is near the gate, the real signal is likely above it.
 
 ---
 

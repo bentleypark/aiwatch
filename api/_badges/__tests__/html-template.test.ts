@@ -93,8 +93,7 @@ describe('renderBadgesPage — CSP-clean (#482)', () => {
     const scripts = html.match(/<script(?![^>]*\bsrc=)[^>]*>/g) ?? [] // inline (no src) script open-tags
     expect(scripts.length).toBeGreaterThanOrEqual(3) // consent init + copyBadge + cookie banner
     for (const tag of scripts) expect(tag).toContain('nonce="NONCE123"')
-    // the gtag.js loader (has src) is also nonce-stamped for GA4 nonce propagation
-    expect(html).toMatch(/<script async nonce="NONCE123" src="https:\/\/www\.googletagmanager\.com/)
+    expect(html).not.toMatch(/<script[^>]*\ssrc="https:\/\/www\.googletagmanager\.com/) // #2070
   })
 
   it('omits the nonce attribute entirely when no nonce is passed (no stray nonce="")', () => {

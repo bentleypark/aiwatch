@@ -143,13 +143,13 @@ setting. Current status and pending checks live in **#998**.
 **The two halves need different instruments.**
 
 - **Rule half** — does the stamp go out? Read `tt=internal` off the outgoing `g/collect` URL in the
-  browser. Immediate, and needs no consent grant: a denied ping carries the stamp too.
+  browser. Immediate. Since #2070 it needs a consent grant, because nothing is sent without one.
 - **Filter half** — does the filter read that stamp? Needs a row in a standard report, so a
   **consent-granted** `localhost` session. Observed: a session on property-date 2026-08-18 came back
   with `testDataFilterName = Internal Traffic`. That establishes **matching**. It does not establish
   that an Active filter **discards** — a separate observation, tracked in #998.
 
-**Do not try to verify the filter half with a consent-denied hit.** The denied ping fired on
+**A consent-denied hit could not verify the filter half** (such hits stopped with #2070). The denied ping fired on
 2026-08-17 KST produced no row at all — which is consistent with Google's
 description of cookieless pings as feeding
 [behavioral and conversion modeling](https://support.google.com/analytics/answer/9976101). A check
