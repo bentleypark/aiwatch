@@ -95,7 +95,7 @@ is the *procedure* — follow it top to bottom.
 3.5. **Local verify** — gate #1 above. Hand off and **wait** for the user's in-browser confirmation.
 4. **Build + test** by scope:
    - Frontend (`src/`): `npm run build` + `npm run test:src` + `npm test` (Playwright).
-   - Worker (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker`.
+   - Worker (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` + `npm run typecheck:worker`.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
 4.5. **Audit new prose** — `npm run audit:prose -- --all` before the first review spawn. Each listed

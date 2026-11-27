@@ -44,9 +44,10 @@ Shared workflow — especially:
 npm test             # Playwright E2E tests
 npm run test:src     # Frontend unit tests (vitest — incl. the CSP hash drift pin, #877 CI-gated)
 npm run test:worker  # Worker unit tests (vitest)
+npm run typecheck:worker  # Worker type check (tsc)
 ```
 
-All tests must pass before submitting a PR — CI gates `test:src`, `test:worker`, and the E2E suite.
+All tests and the worker type check must pass before submitting a PR — CI gates `test:src`, `test:worker`, `typecheck:worker`, and the E2E suite.
 
 ## Pull Request Guidelines
 

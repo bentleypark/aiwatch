@@ -266,6 +266,7 @@ npm run lint         # ESLint
 npm test             # Playwright E2E tests
 npm run test:src     # Frontend unit tests (vitest — incl. CSP hash pin)
 npm run test:worker  # Worker unit tests (vitest)
+npm run typecheck:worker  # Worker type check (tsc)
 
 # Worker deployment
 npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
@@ -466,7 +467,7 @@ contributors should additionally read [CLAUDE.md](CLAUDE.md) for Claude-specific
 3. Follow the shared workflow in [AGENTS.md](AGENTS.md) and
    [docs/reference/development-workflow.md](docs/reference/development-workflow.md); Claude Code
    contributors should also follow [CLAUDE.md](CLAUDE.md)
-4. Build + test: `npm run build && npm test && npm run test:src && npm run test:worker`
+4. Build + test: `npm run build && npm test && npm run test:src && npm run test:worker && npm run typecheck:worker`
 5. Submit a pull request using the [PR template](.github/pull_request_template.md)
 
 ### Issues
@@ -477,7 +478,7 @@ contributors should additionally read [CLAUDE.md](CLAUDE.md) for Claude-specific
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (`npm test` + `npm run test:src` + `npm run test:worker`) — CI-gated, with E2E running on frontend changes
+- All tests and the worker type check must pass (`npm test` + `npm run test:src` + `npm run test:worker` + `npm run typecheck:worker`) — CI-gated, with E2E running on frontend changes
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 

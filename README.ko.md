@@ -265,6 +265,7 @@ npm run lint         # ESLint
 npm test             # Playwright E2E 테스트
 npm run test:src     # 프론트엔드 단위 테스트 (vitest — CSP 해시 핀 포함)
 npm run test:worker  # Worker 단위 테스트 (vitest)
+npm run typecheck:worker  # Worker 타입 검사 (tsc)
 
 # Worker 배포
 npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
@@ -462,7 +463,7 @@ worker/
 1. 레포지토리 포크
 2. 기능 브랜치 생성 (`git checkout -b feature/my-feature`)
 3. [AGENTS.md](AGENTS.md)와 [에이전트 공통 개발 워크플로우](docs/reference/development-workflow.md) 따르기 — Claude Code 기여자는 [CLAUDE.md](CLAUDE.md)도 함께
-4. 빌드 + 테스트: `npm run build && npm test && npm run test:src && npm run test:worker`
+4. 빌드 + 테스트: `npm run build && npm test && npm run test:src && npm run test:worker && npm run typecheck:worker`
 5. [PR 템플릿](.github/pull_request_template.md)으로 풀 리퀘스트 제출
 
 ### 이슈
@@ -473,7 +474,7 @@ worker/
 ### 풀 리퀘스트
 
 - PR당 하나의 기능 또는 수정
-- 모든 테스트 통과 (`npm test` + `npm run test:src` + `npm run test:worker`) — CI 게이트, E2E는 프론트엔드 변경 시 실행
+- 모든 테스트와 Worker 타입 검사 통과 (`npm test` + `npm run test:src` + `npm run test:worker` + `npm run typecheck:worker`) — CI 게이트, E2E는 프론트엔드 변경 시 실행
 - 커밋 메시지에 `closes #N` 포함
 - PR 체크리스트 작성
 
