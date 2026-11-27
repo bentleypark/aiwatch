@@ -29,6 +29,7 @@ automation and skills.
 - `npm run lint` for ESLint.
 - `npm run test:src` for frontend unit tests.
 - `npm run test:worker` for worker unit tests.
+- `npm run typecheck:worker` for the worker type check.
 - `npm test` for Playwright end-to-end tests.
 
 ## Working Rules
